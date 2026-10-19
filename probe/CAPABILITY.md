@@ -90,6 +90,22 @@ serve each index type.>
 <The command that lists the axioms of a file. Its output for a file with no
 axiom and for a file with one axiom.>
 
+## 11. Cubical kernel (S1)
+
+The coin-lang 61f1c8e kernel port gives each row below. The evidence is a
+file that `make check` runs.
+
+| Feature | Form | Evidence |
+|---|---|---|
+| Paths | `PathP A a b`, `Path A a b`, `fun (i : I) => t`, `p @ r`, `refl` | `examples/paths.lang`, `examples/equality.lang` |
+| Transport | `transp LINE r a` | `examples/kan.lang` |
+| Composition | `hcomp A r SYSTEM a` | `examples/kan.lang`, `examples/circle.lang` |
+| Glue | `Glue B r SYSTEM`, `glue SYSTEM b`, `unglue` | `examples/glue.lang` |
+| Univalence | `ua A B e`, `uaArrow` | `examples/univ.lang`, `examples/equiv.lang` |
+| HITs | `S1`, `Trunc1`, `Trunc0`, `Quot A R`, with their point, path and square constructors | `examples/circle.lang`, `examples/trunc.lang`, `examples/quot.lang` |
+| Finite types | `Fin n`, numerals, `finAdd`, `finNeg`, `finMul`, `finVal`, `finEq`, `finCase`, `finAll`, `decEqFin` | `examples/fin.lang`, `examples/dec.lang` |
+| Empty | the builtins `Empty` and `absurd A e`; `decEqNat` | `examples/dec.lang`, `test/path-regressions.c` |
+
 ## Consequences for M0
 
 1. <One rule for the build that a section above forces. Cite the section.>

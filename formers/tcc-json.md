@@ -31,3 +31,21 @@ JSON output of each former: `README.md`, section The JSON document.
 Functions, types, families and equality proofs are not instances. Thus
 F9, F10, F14 and the F12 and F13 proofs have no JSON value of their own.
 A Sigma payload of `Eq` type is `null`.
+
+S1 rows (the coin-lang 61f1c8e kernel port, 2026-10-19). Each status
+covers `langc check`, `langc eval` and `langc build`.
+
+S1 replaces the kit `Eq` encoding above: paths, including Sigma payloads,
+retain their structure. Formal `hcomp` objects include `phi`, `tube` and
+`base`; `phi` and `tube` are source strings in the same interval context.
+
+| ID | Feature | Status and evidence |
+|---|---|---|
+| C1 | Paths: `PathP`, `Path`, `@`, `refl` | DONE: `examples/paths.lang`, `examples/equality.lang` |
+| C2 | `transp` | DONE: `examples/kan.lang` |
+| C3 | `hcomp` | DONE: `examples/kan.lang`, `examples/circle.lang` |
+| C4 | Glue, `glue`, `unglue` | DONE: `examples/glue.lang` |
+| C5 | `ua`, `uaArrow` | DONE: `examples/univ.lang`, `examples/equiv.lang` |
+| C6 | HITs `S1`, `Trunc1`, `Trunc0`, `Quot` | DONE: `examples/circle.lang`, `examples/trunc.lang`, `examples/quot.lang` |
+| C7 | `Fin` and the Fin transport tables in JSON | DONE: `examples/fin.lang`, `examples/dec.lang`, `test/json/fin.json` |
+| C8 | The builtins `Empty` and `absurd` | DONE: `examples/dec.lang`, `test/path-regressions.c` |

@@ -28,6 +28,19 @@ them as open items:
   runner in C that loads and runs guest test files is permitted. Do not add
   a node, Python or shell harness. The kit JS regressions stay.
 
+### USER ruling (S1)
+
+The USER gave this ruling on 2026-10-18, before S1:
+
+RULINGS: O1=a O2=a O3=a O4=a O5=a O6=a O7=a O8=a O9=a O10=a O11=a O12=a O13=a O14=a O15=a O16=a O17=a O18=a O19=a O20=a
+
+Each letter is the proposal (a) of section 9. Thus the slice order of
+section 8 does not change.
+
+Amendment (USER, 2026-10-18, after the S1 kickoff): also admit the `Fin`
+type former. This replaces O5 (a). The coin-lang `Fin n` builtin and its
+operations stay (sections 2 and 4). The other coin types go.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |
@@ -41,6 +54,7 @@ them as open items:
 | Quotients, QITs, HITs | quotients, QITs, HITs | Path constructors, square constructors, `S1`, `Trunc1`, `Trunc0` and `Quot A R` of coin-lang S4a to S4c. | S1 |
 | QIITs, HIITs | QIITs, HIITs | Indexed families and mutual blocks (`and`) of orbit-lang S6 (6fa6a15, 8dd82a3, 8b11846), and the dependent eliminator of orbit-lang 676c7a8. | S2 |
 | Higher kinded types | higher kinded types | A type operator is a term of `U -> U` (a Pi type into the universe). A family takes type parameters. There is no new former. | S1 |
+| Finite types | (USER amendment, section 1) | `Fin n` of coin-lang 61f1c8e: the numerals, `finCase`, `finAll`, the Fin ring, `decEqFin`, `isSetFin`, and the Fin transport tables in JSON (O5). | S1 |
 
 ## 3. The no-irrelevance rule
 
@@ -83,8 +97,9 @@ The kernel is a port. It is not a new design.
   eliminator of orbit-lang S6 and S7. orbit-lang comes from the
   tcc-evm-contract kit, so S2 ports the diffs of its front files, not the
   files.
-- The coin-lang `Fin n` builtin, `finAll` and the `Fin` transport tables
-  (coin-lang JSON rule 1) are not in the base span of this request (O5).
+- The coin-lang `Fin n` builtin, `finAll`, `finCase`, the Fin ring and
+  the `Fin` transport tables (coin-lang JSON rule 1) stay. The USER
+  admitted `Fin` (section 1, amendment; O5).
 
 ## 5. The base types
 
@@ -173,7 +188,7 @@ document of the instances; it becomes `langc json` and stays as a test aid
 | Slice | Contents |
 |---|---|
 | S0 | This seed: the kit, the design, this plan. |
-| S1 | The coin-lang kernel port (section 4). Remove the coin domain. |
+| S1 | The coin-lang kernel port (section 4). Remove the coin domain. DONE 2026-10-19: rulings K1 to K7 = (a), Fin admitted; `docs/STATUS.md`, section S1. |
 | S2 | The orbit-lang indexed families, mutual blocks and dependent eliminator: QIITs and HIITs. |
 | S3 | The base span: remove the kit sample types that the request does not give, add `Text`, `Int64`, `Nat` (no bound), `Json` and `Log` with the section 5 operations. |
 | S4 | Coinductive families: guarded `unfold`, lazy `out` (O4). |
@@ -198,7 +213,8 @@ Each item gives the proposal first.
 - O4 Coalgebras: (a) coinductive families with a guarded `unfold`; (b) keep
   the kit `unfold` with a step limit only (then O3 must be (b)).
 - O5 `Fin n`: (a) remove it with the coin domain; (b) keep it as a library
-  family over `Nat`.
+  family over `Nat`. RULED (USER, 2026-10-18): neither. Keep the coin-lang
+  `Fin n` builtin and its operations (section 1, amendment).
 - O6 Pure operations: (a) each base type has its introduction and
   elimination forms and the section 5 minimum; (b) no pure operation that
   the request does not name.

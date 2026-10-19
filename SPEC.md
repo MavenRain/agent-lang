@@ -47,6 +47,26 @@ the host form of each former.
 |---|---|---|---|
 | | | | |
 
+### 3.1 Finite types (USER amendment, S1)
+
+`Fin n` is a type former of coin-lang 61f1c8e. The USER admitted it after
+the S1 kickoff (`docs/PLAN.md`, section 1), and the port keeps it as it is.
+
+- Former: `Fin n` for a `Nat` literal `n`. The numerals `0` to `n - 1` are
+  its terms. `Fin 0` has no term.
+- Ring: `finAdd n a b`, `finNeg n a` and `finMul n a b` reduce modulo `n`.
+  `finVal n a` gives the `Nat` value. `finEq n a b` gives a `Fin 2`.
+- Case: `finCase n k c0 ... c(n-1)` folds a term of `Fin n`. `finAll n f`
+  gives the `Fin n` function of the cases. A `finCase` at a closed literal
+  scrutinee checks at the top level.
+- Decidable equality: `decEqFin n a b` and `decEqNat a b` give
+  `Dec (Path T a b)` (`domain/domain.lang`, `Dec`). The refutation is a
+  closure that transports `unit` along a line into `Empty`.
+- The builtins `Empty : Type 0` and `absurd : (A : Type 0) -> Empty -> A`
+  replace the coin `Fin 0` in the refutation type (ruling K2).
+- Tests: `examples/fin.lang`, `examples/dec.lang`, the `fin` and `dec`
+  refusals in `test/check/`, and the Fin cases of `test/path-regressions.c`.
+
 ## 4. Structures
 
 > Write here: the carriers of Monad (F5), fold and unfold (F6, F7) and
