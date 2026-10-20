@@ -361,3 +361,65 @@ Deviations:
    printer omits, and only `fold_hcomp` reads `fold_res` in an observable
    way (the hcomp type). A first attempt without `oloop` survived. The
    domain has no `Unit`, so the two targets are Nat and `Fin 2`.
+
+## S3: the base span (2026-10-19)
+
+### Chunk A: types and check
+
+Chunk A adds the base types of PLAN section 5 with their checks: `Text`
+(the `"..."` literal with the escapes `\" \\ \n \t \xHH`, `CORE_TEXT`,
+`VAL_TEXT`), `Int64` (a `CORE_NAT` leaf marked `op = OP_INT64`, `VAL_INT64`),
+a Nat literal at or above 2^64 (`CORE_BIG`, `VAL_BIG`, little-endian base
+2^32 limbs), the 18 operation names of rows 74 to 75 and 162 (`textAppend`
+to `jsonRender`), `Bool = Fin 2` with `true`, `false` and `boolIf` in the
+domain (Q1 (a)), and the domain families `Json`, `JsonList`, `JsonFields`
+(one block) and `Log` with `logLength` (Q7 (a), Q8 (a)). `Flag`, `flagYes`,
+`flagNo` and `flagIf` are gone: `natEq` and `natLe` return `Fin 2`, and
+the filter test is a `Fin 2`. The eval of every new operation is chunk B:
+`reduce_op` returns a `VAL_STUCK` for each. json.c emits an `Int64` literal
+as a number so `jnum (inl n)` keeps its declared payload; `Text` JSON
+emission and big Nat decimal printing are left for chunk B.
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 23 | 0 (seven rewritten: entries, formers, monad, laws, fin, algebra, inventory) |
+| parse refusals | 13 | +2 (`text-unterminated.lang LEX_STR_OPEN`, `text-escape.lang LEX_STR_ESCAPE`) |
+| check refusals | 71 | +4 (`text-literal-type.lang`, `text-slice-arity.lang`, `int64-literal-range.lang`, `json-entry-type.lang`) |
+| evals | 61 | 0 (rows 13 to 17 and 25 change their outputs) |
+| json goldens | 23 | 0 (formers, inventory, laws, monad regenerated) |
+| build refusals | 3 | 0 |
+| regressions | 6 | 0 |
+| printer regressions | 2 | 0 |
+| path regressions | 119 | +8 (limb allocation failure, Json number payloads, Int64 JSON, and literal composition) |
+
+Removed: the sample domain (`Color`, `Item`, `Stack`, `Lot`, `lineTotal`,
+`isRed`, `total`, `redTotal`, `depth`), `Flag` and its three operations,
+the `LEX_NAT_RANGE` refusal (a span at or above 2^64 lexes with
+`nat = UINT64_MAX` and its digits kept), the `Entry` flag fields.
+
+Deviations:
+
+- `string.lang` now reads `'bolt'` (code `LEX_CHAR` stays) and
+  `nat-range.lang` reads `def x : Fin 18446744073709551616 := 0` (code
+  `FIN_RANGE`): the old inputs lex in S3.
+- The two dependent-map sites (`dependent-result.lang`,
+  `path-regressions.c` "dependent congruence") use the `Charter`/`Ratified`
+  block, because `Vec Nat n` has no closed map `(n : Nat) -> Vec Nat n`.
+  `regressions.js` keeps `Vec Nat n` at closed values.
+- `Json` is a block of three families. PLAN row 162 writes `jarr (List
+  Json)` and `jobj (List (Sigma Text Json))`, but the family rule takes
+  direct recursion only (`DOMAIN_FAMILY`), so `JsonList` and `JsonFields`
+  carry the lists. `jnum` carries `Sum Int64 Text` (Q7 (a)).
+- An `Int64` literal is a `CORE_NAT` with `op = OP_INT64`, not a new
+  `CoreKind`; `quote` and `eval` read the mark.
+- `Bool` is reserved for program declarations only (`is_reserved` in
+  `check_decl`), since the domain now defines it. `Text` left `RESERVED`:
+  it is a core name.
+- The examples hold no `Text` value at the top level: json.c cannot emit
+  one before chunk B. `inventory.lang` uses `jnum` records and a priced
+  `Sigma`.
+
+Review fixes: a failed limb allocation reports `OOM` instead of checking
+the literal as `UINT64_MAX`. Literal composition uses the same head rule
+for `Text`, `Int64`, big Nat and word Nat values. The Json number tests
+accept both sum branches and refuse a bare Nat payload.

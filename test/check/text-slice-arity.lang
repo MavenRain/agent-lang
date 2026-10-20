@@ -1,0 +1,1 @@
+def wrong : Text := textSlice "abc" 1

@@ -1,22 +1,13 @@
 -- Sample domain. Replace it with your design. See domain/README.md.
 -- Each family, constructor, field and def name here becomes a core name
 -- (rule R4). Only this file can declare a family (rule R1).
-family Color := red | green | blue
-family Item := makeItem (itemColor : Color) (itemPrice : Nat) (itemCount : Nat)
-family Stack := bottom | push (top : Nat) (rest : Stack)
--- An indexed family (former F15): `Lot 3` is a lot of size 3.
-family Lot (size : Nat) := makeLot (lotPrice : Nat)
-
-def lineTotal : (item : Item) -> Nat :=
-  fun (item : Item) => natMul (itemPrice item) (itemCount item)
-def isRed : (color : Color) -> Flag :=
-  fun (color : Color) => fold flagYes flagNo flagNo color
-def total : (items : List Item) -> Nat :=
-  fun (items : List Item) => fold (fun (item : Item) (acc : Nat) => natAdd (lineTotal item) acc) 0 items
-def redTotal : (items : List Item) -> Nat :=
-  fun (items : List Item) => total (filter (fun (item : Item) => isRed (itemColor item)) items)
-def depth : (s : Stack) -> Nat :=
-  fun (s : Stack) => fold 0 (fun (top : Nat) (rest : Nat) => natAdd rest 1) s
+-- Bool is Fin 2 (PLAN section 5, Q1 (a)): false is 0 and true is 1.
+-- boolIf is a finCase, so natEq, natLe and the filter tests give a Bool.
+def Bool : Type 0 := Fin 2
+def true : Bool := 1
+def false : Bool := 0
+def boolIf : (A : Type 0) -> Bool -> A -> A -> A :=
+  fun (A : Type 0) (b : Bool) (yes : A) (no : A) => finCase 2 b no yes
 
 -- The circle, a higher inductive family (S4a, R1 (a)). The path
 -- constructor loop goes from base to base.
@@ -51,6 +42,18 @@ family Charter (R : Type 0) := genesis
     [ ~i -> adopt R twiceBase (ratify R twiceBase twiceRule),
       i -> adopt R (adopt R twiceBase (ratify R twiceBase twiceRule)) (ratify R (adopt R twiceBase (ratify R twiceBase twiceRule)) twiceRule) ]
 and Ratified (R : Type 0) : Charter R -> Type 0 := ratify (ratifyBase : Charter R) (ratifyRule : R) : Ratified R ratifyBase
+
+-- Json (PLAN row 162, Q7 (a)): the JSON value tree. The family rule takes
+-- direct recursion only, so the two lists are the block families JsonList
+-- and JsonFields (STATUS deviation). jnum keeps integers or decimal text.
+family Json := jnull | jbool (jboolValue : Bool) | jnum (jnumValue : Sum Int64 Text) | jstr (jstrValue : Text) | jarr (jarrItems : JsonList) | jobj (jobjFields : JsonFields)
+and JsonList := jlNil | jlCons (jlHead : Json) (jlTail : JsonList)
+and JsonFields := jfNil | jfCons (jfKey : Text) (jfValue : Json) (jfTail : JsonFields)
+-- Log (PLAN row 163, Q8 (a), O11): a snoc list of Json entries, with its
+-- length by fold.
+family Log := logEmpty | logAppend (logRest : Log) (logEntry : Json)
+def logLength : (l : Log) -> Nat :=
+  fun (l : Log) => fold 0 (fun (rest : Nat) (entry : Json) => natAdd rest 1) l
 
 -- Kan library (S2a, R6 (a)): transport, subst, J and the J rule as a path
 -- (JRefl, O11), all by transp.

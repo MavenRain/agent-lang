@@ -62,6 +62,30 @@ transp at an indexed or block sort stays neutral for every line.  Q9:
 families stay in domain/domain.lang (rule R1).  The slice order of section 8
 does not change.
 
+### USER ruling (S3)
+
+The USER gave this ruling on 2026-10-19, after the S3 kickoff (the kickoff
+record, outside the repo, section 2):
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a
+
+Each letter is the proposal (a) of the kickoff.  Q1: `Bool := Fin 2` as a
+domain def with `true`, `false` and `boolIf`;  `Flag`, `flagYes`, `flagNo`
+and `flagIf` go;  `natEq`, `natLe`, `textEq`, `textUtf8`, `int64Eq` and
+`int64Le` give `Bool`.  Q2: the sample domain (`Color`, `Item`, `Stack`,
+`Lot` and their defs) goes;  its users are rewritten over `Fin`, `Vec`,
+`Json` and `Log`.  Q3: a Nat below 2^64 stays a machine word;  a larger
+Nat is a limb value;  every Nat operation promotes and demotes.  Q4: a
+Text is a JSON string when it is valid UTF-8, else `{"bytes":"HEX"}`.
+Q5: a numeral checks at `Int64` by the Fin literal rule;  `int64Neg` gives
+the negatives;  no `decEqInt64`.  Q6: a Nat in the JSON document is a JSON
+number of any length.  Q7: `Json` is a domain family with the six
+constructors of section 5, `jnum` over `Sum Int64 Text`;  `jsonParse` and
+`jsonRender` are builtins bound to that family.  Q8: `Log` is a domain
+family with `logEmpty` and `logAppend`;  `logFold` is `fold`;  `logLength`
+is a def.  Q9: the Nat overflow trap goes;  the fuel trap stays.  The
+slice order of section 8 does not change.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |

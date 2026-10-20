@@ -1,0 +1,1 @@
+def wrong : Json := jstr 3

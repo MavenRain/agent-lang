@@ -218,8 +218,50 @@ static int distinct_path_json(const char *label, const char *first, const char *
   return ok;
 }
 
+/* A failed limb allocation must not turn the digit span into UINT64_MAX. */
+static int nat_literal_oom(void) {
+  char digits[200001];
+  Term type = {.kind = TERM_VAR, .name = "Nat"};
+  Term body = {.kind = TERM_NAT, .name = digits, .nat = UINT64_MAX};
+  Decl decl = {.kind = DECL_DEF, .origin = ORIGIN_PROGRAM,
+    .name = "large", .type = &type, .body = &body};
+  DeclList decls = {.items = &decl, .count = 1, .cap = 1};
+  Arena arena;
+  Machine m;
+  Diag diag;
+  int ok;
+  cases_run++;
+  memset(digits, '9', sizeof digits - 1u);
+  digits[sizeof digits - 1u] = '\0';
+  arena_init(&arena, (size_t)1 << 16);
+  diag_init(&diag);
+  ok = !check_program(&arena, &decls, &m, &diag)
+    && diag.set && strcmp(diag.code, "OOM") == 0;
+  if (!ok) {
+    fprintf(stderr, "FAIL big Nat allocation failure: expected OOM, got %s\n",
+      diag.set ? diag.code : "an accepted truncated literal");
+  }
+  arena_release(&arena);
+  return ok;
+}
+
 int main(void) {
   int failed = 0;
+  failed += !nat_literal_oom();
+  failed += !accepts("Json signed number payload",
+    "def signed : Json := jnum (inl 7)\n");
+  failed += !accepts("Json decimal text payload",
+    "def decimal : Json := jnum (inr \"-1.25e3\")\n");
+  failed += !domain_refuses("Json rejects a bare Nat payload", "",
+    "def wrong : Json := jnum 7\n", "TYPE_MISMATCH");
+  failed += !json_contains("Int64 literal JSON emission",
+    "def limit : Int64 := 9223372036854775807\n", "\"value\":9223372036854775807");
+  failed += !accepts("Text literal composition",
+    "def same : PathP (fun (j : I) => Path Text (hcomp Text j (fun (_ : I) => [ j -> \"a\\x00b\" ]) \"a\\x00b\") \"a\\x00b\") refl refl := fun (j : I) => refl\n");
+  failed += !accepts("Int64 literal composition",
+    "def same : PathP (fun (j : I) => Path Int64 (hcomp Int64 j (fun (_ : I) => [ j -> 7 ]) 7) 7) refl refl := fun (j : I) => refl\n");
+  failed += !accepts("big Nat literal composition",
+    "def same : PathP (fun (j : I) => Path Nat (hcomp Nat j (fun (_ : I) => [ j -> 18446744073709551616 ]) 18446744073709551616) 18446744073709551616) refl refl := fun (j : I) => refl\n");
   failed += !system_conversion();
   failed += !accepts("Glue composition with reordered faces",
     "def G : Path (Type 0) (Fin 3) (Fin 3) := fun (j : I) => Glue (Fin 3) (~j \\/ j) (fun (_ : I) => [ ~j -> pack (Fin 3) (idEquiv (Fin 3)), j -> pack (Fin 3) (idEquiv (Fin 3)) ])\n"
@@ -242,7 +284,7 @@ int main(void) {
   failed += !roundtrip("application of a path of functions",
     "def original : (p : Path (Nat -> Nat) (fun n => n) (fun n => n)) -> Path Nat 0 0 := fun p => fun (i : I) => (p @ i) 0\n");
   failed += !roundtrip("dependent congruence",
-    "def original : (p : Path Nat 0 0) -> PathP (fun (i : I) => Lot (p @ i)) (makeLot 0 7) (makeLot 0 7) := fun p => cong (fun (n : Nat) => makeLot n 7) p\n");
+    "def original : (p : Path (Charter Nat) (genesis Nat) (genesis Nat)) -> PathP (fun (i : I) => Ratified Nat (p @ i)) (ratify Nat (genesis Nat) 7) (ratify Nat (genesis Nat) 7) := fun p => cong (fun (c : Charter Nat) => ratify Nat c 7) p\n");
   failed += !roundtrip("dependent symmetry",
     "def original : (A : Path (Type 0) Nat Nat) -> (p : PathP (fun (j : I) => A @ j) 0 1) -> PathP (fun (i : I) => A @ ~i) 1 0 := fun A p => sym p\n");
   failed += !roundtrip("dependent function extensionality",

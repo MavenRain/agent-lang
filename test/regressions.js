@@ -71,19 +71,19 @@ function test(name, fn) {
 
 try {
   test('Sum bind preserves its error type', () => {
-    refused('def s : Sum Flag Nat := inl flagNo\ndef bad : Sum Nat Nat := bind s (fun (n : Nat) => inr n)', 'TYPE_MISMATCH');
+    refused('def s : Sum Bool Nat := inl false\ndef bad : Sum Nat Nat := bind s (fun (n : Nat) => inr n)', 'TYPE_MISMATCH');
     refused('def s : Sum (Path Nat 0 0) Nat := inl refl\ndef bad : Sum (Path Nat 0 1) Nat := bind s (fun (n : Nat) => inr n)', 'TYPE_MISMATCH');
     refused('def s : Sum (Type 1) Nat := inl (Type 0)\ndef bad : Sum (Type 0) Nat := bind s (fun (n : Nat) => inr n)', 'TYPE_MISMATCH');
-    const doc = built('def s : Sum Flag Nat := inl flagNo\ndef keep : Sum Flag Unit := bind s (fun (n : Nat) => inr unit)\ndef success : Sum Flag Nat := bind (inr 3) (fun (n : Nat) => inr (natAdd n 1))');
-    assert.deepEqual(doc.instances[1].value, {inl: false});
+    const doc = built('def s : Sum Bool Nat := inl false\ndef keep : Sum Bool Unit := bind s (fun (n : Nat) => inr unit)\ndef success : Sum Bool Nat := bind (inr 3) (fun (n : Nat) => inr (natAdd n 1))');
+    assert.deepEqual(doc.instances[1].value, {inl: 0});
     assert.deepEqual(doc.instances[2].value, {inr: 4});
   });
 
   test('printed types preserve binding under normalization', () => {
     const cases = [
-      ['def T : Nat -> Type 0 := fun (n : Nat) => Sigma (x : Nat) (Lot n)\n', 'Sigma (x : Nat) (T x)', 'pack 3 (pack 4 (makeLot 3 9))'],
+      ['def T : Nat -> Type 0 := fun (n : Nat) => Sigma (x : Nat) (Vec Nat n)\n', 'Sigma (x : Nat) (T x)', 'pack 1 (pack 4 (vcons Nat 0 9 (vnil Nat)))'],
       ['def T : Type 0 := Nat\n', 'Sigma (Nat : Nat) T', 'pack 3 4'],
-      ['def _x0 : Type 0 := Nat\ndef T : Nat -> Type 0 := fun (n : Nat) => Sigma (x : Nat) (Lot n)\n', 'Sigma (x : Nat) (T x)', 'pack 3 (pack 4 (makeLot 3 9))'],
+      ['def _x0 : Type 0 := Nat\ndef T : Nat -> Type 0 := fun (n : Nat) => Sigma (x : Nat) (Vec Nat n)\n', 'Sigma (x : Nat) (T x)', 'pack 1 (pack 4 (vcons Nat 0 9 (vnil Nat)))'],
       ['def plus : Nat -> Nat := natAdd 1\n', 'Option (Path (Nat -> Nat) plus plus)', 'some refl'],
     ];
     for (const [prefix, type, value] of cases) {

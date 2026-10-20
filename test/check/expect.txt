@@ -65,3 +65,7 @@ elim-family-count.lang TYPE_MISMATCH
 elim-motive-index.lang TYPE_MISMATCH
 elim-block.lang TYPE_MISMATCH
 elim-path-case.lang PATH_END
+text-literal-type.lang TYPE_MISMATCH
+text-slice-arity.lang TYPE_ARITY
+int64-literal-range.lang TYPE_MISMATCH
+json-entry-type.lang TYPE_MISMATCH

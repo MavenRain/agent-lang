@@ -19,7 +19,8 @@
 /* The core names: type formers, constructors and operations. */
 typedef enum {
   OP_NAT,
-  OP_FLAG,
+  OP_TEXT,     /* Text: a byte string; a value is a VAL_TEXT literal (S3) */
+  OP_INT64,    /* Int64: a two's complement 64-bit integer; a value is a VAL_INT64 literal (S3) */
   OP_UNIT,
   OP_PROD,
   OP_SUM,
@@ -27,8 +28,6 @@ typedef enum {
   OP_LIST,
   OP_FAMILY,
   OP_UNIT_VAL,
-  OP_FLAG_YES,
-  OP_FLAG_NO,
   OP_PAIR,
   OP_INL,
   OP_INR,
@@ -58,7 +57,6 @@ typedef enum {
   OP_SUCC,
   OP_NAT_EQ,
   OP_NAT_LE,
-  OP_FLAG_IF,
   OP_PROJ,
   OP_INTERVAL, /* the sort I: never a type, only the type of an interval term */
   OP_TRANSP,   /* transp L phi a: L a line (a path value in U), phi a face */
@@ -78,7 +76,25 @@ typedef enum {
   OP_UNGLUE,   /* unglue: A, phi, sys, g; stuck when no rule applies */
   OP_EMPTY,    /* Empty: the type with no value (K2) */
   OP_ELIM,     /* elim: field = family + 1, then the motive, one case per constructor, the value */
-  OP_ABSURD    /* absurd A e: e : Empty; always stuck, because Empty has no closed value */
+  OP_ABSURD,   /* absurd A e: e : Empty; always stuck, because Empty has no closed value */
+  OP_TEXT_APPEND,  /* textAppend a b: the bytes of a, then the bytes of b (S3) */
+  OP_TEXT_EQ,      /* textEq a b: 1 in Fin 2 when the bytes agree, else 0 */
+  OP_TEXT_SLICE,   /* textSlice a from to: the bytes at the indices from up to to */
+  OP_TEXT_LENGTH,  /* textLength a: the byte count as a Nat */
+  OP_TEXT_UTF8,    /* textUtf8 a: 1 in Fin 2 when the bytes are valid UTF-8, else 0 */
+  OP_NAT_SHOW,     /* natShow n: the decimal digits of n as a Text */
+  OP_INT64_ADD,    /* int64Add a b: a + b modulo 2^64 */
+  OP_INT64_SUB,    /* int64Sub a b: a - b modulo 2^64 */
+  OP_INT64_MUL,    /* int64Mul a b: a * b modulo 2^64 */
+  OP_INT64_NEG,    /* int64Neg a: the negation of a modulo 2^64 */
+  OP_INT64_DIV,    /* int64Div a b: some of the quotient toward zero, none at b = 0 */
+  OP_INT64_REM,    /* int64Rem a b: some of the remainder, none at b = 0 */
+  OP_INT64_EQ,     /* int64Eq a b: 1 in Fin 2 when a = b, else 0 */
+  OP_INT64_LE,     /* int64Le a b: 1 in Fin 2 when a <= b, else 0 */
+  OP_INT64_TO_NAT, /* int64ToNat a: some a when a >= 0, else none */
+  OP_NAT_TO_INT64, /* natToInt64 n: some n when n <= 2^63 - 1, else none */
+  OP_JSON_PARSE,   /* jsonParse t: inr of the Json value, or inl of the error text */
+  OP_JSON_RENDER   /* jsonRender j: the JSON text of j */
 } Op;
 
 /* The instance of pure, map, bind and filter (formers F5 and F8). */
@@ -91,7 +107,9 @@ typedef enum {
 typedef enum {
   CORE_VAR,    /* index: de Bruijn index */
   CORE_GLOBAL, /* index: definition number */
-  CORE_NAT,    /* nat */
+  CORE_NAT,    /* nat; op = OP_INT64 marks an Int64 literal (S3) */
+  CORE_TEXT,   /* name: the bytes, nat: their length (S3) */
+  CORE_BIG,    /* limbs: the little-endian 32-bit limbs, nat of them; a Nat at or above 2^64 (S3) */
   CORE_TRAP,   /* an overflow; only quote writes it */
   CORE_UNIV,   /* Type nat */
   CORE_LAM,    /* fun name => b */
@@ -119,7 +137,8 @@ struct Core {
      constructor. OP_PURE, OP_MAP, OP_BIND, OP_FILTER: the Carrier. */
   uint32_t inst;
   uint32_t field; /* OP_PROJ: the field number */
-  const char *name;
+  const char *name; /* CORE_TEXT: the bytes */
+  const uint32_t *limbs; /* CORE_BIG: the little-endian limbs, nat of them */
   const Core *a; /* OP_FIN_CASE: its result type, for printing in inference mode */
   const Core *b;
   const Core *const *args;
@@ -140,7 +159,10 @@ typedef enum {
   VAL_PLAM,  /* a path abstraction (a closure on an interval variable) */
   VAL_PATHP, /* a path type: the line is the closure, args[0..1] the ends */
   VAL_IVAL,  /* an interval term in normal form */
-  VAL_PAPP   /* neutral: a neutral path at an interval value */
+  VAL_PAPP,  /* neutral: a neutral path at an interval value */
+  VAL_TEXT,  /* a Text literal: name the bytes, nat their length (S3) */
+  VAL_INT64, /* an Int64 literal: i64 (S3) */
+  VAL_BIG    /* a Nat at or above 2^64: limbs, nat of them (S3) */
 } ValKind;
 
 /* An interval literal is level * 2 + 1 for a negated variable, else
@@ -212,13 +234,15 @@ struct Env {
 
 struct Value {
   ValKind kind;
-  uint64_t nat; /* NAT: the number. UNIV: the level. VAR: the level. */
+  uint64_t nat; /* NAT: the number. UNIV: the level. VAR: the level. TEXT: the length. BIG: the limb count. */
   Op op;        /* OP, STUCK */
   uint32_t inst;
   uint32_t field;
   const Value *const *args;
   uint32_t argc;
-  const char *name; /* LAM, PI, SIGMA: the binder */
+  const char *name; /* LAM, PI, SIGMA: the binder. TEXT: the bytes. */
+  int64_t i64;      /* INT64: the number */
+  const uint32_t *limbs; /* BIG: the little-endian limbs, nat of them */
   const Value *dom; /* PI, SIGMA: the domain. APP, PAPP: the function. FIN_CASE: result type. */
   const Value *arg; /* APP, PAPP: the argument. A PI with no body: the codomain. */
   const Env *env;   /* LAM, PI, SIGMA, PLAM, PATHP: the closure */
@@ -325,6 +349,10 @@ typedef struct GlueRec {
 /* Each function returns NULL (or 0) after a diagnostic. A NULL input gives a
    NULL result, so a caller can test once at the end. */
 const Value *val_nat(Machine *m, uint64_t n);
+/* S3 literals: a Text of LEN bytes, an Int64, a big Nat of COUNT limbs. */
+const Value *val_text(Machine *m, const char *bytes, uint64_t len);
+const Value *val_int64(Machine *m, int64_t n);
+const Value *val_big(Machine *m, const uint32_t *limbs, uint64_t count);
 const Value *val_var(Machine *m, uint32_t level);
 /* The interval variable at LEVEL. */
 const Value *val_ivar(Machine *m, uint32_t level);

@@ -95,7 +95,9 @@ typedef enum {
   RULE_GLUE,
   RULE_GLUE_ELEM,
   RULE_UNGLUE,
-  RULE_FLAG_IF,
+  RULE_TEXT,
+  RULE_INT64,
+  RULE_JSON,
   RULE_ABSURD
 } Rule;
 
@@ -110,7 +112,8 @@ typedef struct {
 
 static const Builtin BUILTINS[] = {
   {"Nat", 0, RULE_TYPE0, OP_NAT, OP_NAT, 0},
-  {"Flag", 0, RULE_TYPE0, OP_FLAG, OP_NAT, 0},
+  {"Text", 0, RULE_TYPE0, OP_TEXT, OP_NAT, 0},
+  {"Int64", 0, RULE_TYPE0, OP_INT64, OP_NAT, 0},
   {"Unit", 0, RULE_TYPE0, OP_UNIT, OP_NAT, 0},
   {"Empty", 0, RULE_TYPE0, OP_EMPTY, OP_NAT, 0},
   {"Prod", 2, RULE_TYPE2, OP_PROD, OP_NAT, 0},
@@ -132,8 +135,6 @@ static const Builtin BUILTINS[] = {
   {"PathP", 3, RULE_PATHP, OP_INTERVAL, OP_NAT, 0},
   {"Path", 3, RULE_PATH, OP_INTERVAL, OP_NAT, 0},
   {"unit", 0, RULE_VALUE0, OP_UNIT_VAL, OP_UNIT, 0},
-  {"flagYes", 0, RULE_VALUE0, OP_FLAG_YES, OP_FLAG, 0},
-  {"flagNo", 0, RULE_VALUE0, OP_FLAG_NO, OP_FLAG, 0},
   {"pair", 2, RULE_PAIR, OP_PAIR, OP_PROD, 0},
   {"inl", 1, RULE_INJ, OP_INL, OP_SUM, 0},
   {"inr", 1, RULE_INJ, OP_INR, OP_SUM, 1},
@@ -168,16 +169,34 @@ static const Builtin BUILTINS[] = {
   {"natSub", 2, RULE_NAT2, OP_NAT_SUB, OP_NAT, 0},
   {"natMul", 2, RULE_NAT2, OP_NAT_MUL, OP_NAT, 0},
   {"succ", 1, RULE_NAT2, OP_SUCC, OP_NAT, 0},
-  {"natEq", 2, RULE_NAT2, OP_NAT_EQ, OP_FLAG, 0},
-  {"natLe", 2, RULE_NAT2, OP_NAT_LE, OP_FLAG, 0},
-  {"flagIf", 3, RULE_FLAG_IF, OP_FLAG_IF, OP_FLAG, 0},
+  {"natEq", 2, RULE_NAT2, OP_NAT_EQ, OP_FIN, 2},
+  {"natLe", 2, RULE_NAT2, OP_NAT_LE, OP_FIN, 2},
+  {"textAppend", 2, RULE_TEXT, OP_TEXT_APPEND, OP_TEXT, 0},
+  {"textEq", 2, RULE_TEXT, OP_TEXT_EQ, OP_FIN, 2},
+  {"textSlice", 3, RULE_TEXT, OP_TEXT_SLICE, OP_TEXT, 0},
+  {"textLength", 1, RULE_TEXT, OP_TEXT_LENGTH, OP_NAT, 0},
+  {"textUtf8", 1, RULE_TEXT, OP_TEXT_UTF8, OP_FIN, 2},
+  {"natShow", 1, RULE_TEXT, OP_NAT_SHOW, OP_TEXT, 0},
+  {"int64Add", 2, RULE_INT64, OP_INT64_ADD, OP_INT64, 0},
+  {"int64Sub", 2, RULE_INT64, OP_INT64_SUB, OP_INT64, 0},
+  {"int64Mul", 2, RULE_INT64, OP_INT64_MUL, OP_INT64, 0},
+  {"int64Neg", 1, RULE_INT64, OP_INT64_NEG, OP_INT64, 0},
+  {"int64Div", 2, RULE_INT64, OP_INT64_DIV, OP_OPTION, 0},
+  {"int64Rem", 2, RULE_INT64, OP_INT64_REM, OP_OPTION, 0},
+  {"int64Eq", 2, RULE_INT64, OP_INT64_EQ, OP_FIN, 2},
+  {"int64Le", 2, RULE_INT64, OP_INT64_LE, OP_FIN, 2},
+  {"int64ToNat", 1, RULE_INT64, OP_INT64_TO_NAT, OP_OPTION, 1},
+  {"natToInt64", 1, RULE_INT64, OP_NAT_TO_INT64, OP_OPTION, 0},
+  {"jsonParse", 1, RULE_JSON, OP_JSON_PARSE, OP_SUM, 0},
+  {"jsonRender", 1, RULE_JSON, OP_JSON_RENDER, OP_TEXT, 0},
   {"absurd", 2, RULE_ABSURD, OP_ABSURD, OP_NAT, 0}
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof BUILTINS / sizeof BUILTINS[0]))
 
-/* Names that no declaration can take (rule R4). */
-static const char *const RESERVED[] = {"Bool", "Text"};
+/* Names that no program declaration can take (rule R4): the domain defines
+   Bool (S3 chunk A). */
+static const char *const RESERVED[] = {"Bool"};
 
 typedef enum {
   HEAD_TERM, /* a local, a definition or another term: plain application */
@@ -339,9 +358,17 @@ static const Value *nat_type(Checker *c) {
   return tyop(c, OP_NAT, 0, NULL, NULL, NULL);
 }
 
-/* Flag: the result type of a filter predicate. */
-static const Value *flag_type(Checker *c) {
-  return tyop(c, OP_FLAG, 0, NULL, NULL, NULL);
+/* Bool = Fin 2: the result type of a filter predicate and of the tests. */
+static const Value *bool_type(Checker *c) {
+  return tyop(c, OP_FIN, 1, val_nat(c->m, 2), NULL, NULL);
+}
+
+static const Value *text_type(Checker *c) {
+  return tyop(c, OP_TEXT, 0, NULL, NULL, NULL);
+}
+
+static const Value *int64_type(Checker *c) {
+  return tyop(c, OP_INT64, 0, NULL, NULL, NULL);
 }
 
 /* The sort I: the type of an interval term, never a type itself. */
@@ -858,7 +885,7 @@ static const Core *rule_filter(Call *k) {
     return NULL;
   if (!carrier_of(mt, &carrier, &a) || carrier == CARRIER_SUM)
     return nul(FAIL(c, "TYPE_MISMATCH", "filter needs a value of type Option A or List A, found a term of type %s", show(c, mt)));
-  p = check(c, k->args[0], val_arrow(c->m, a, flag_type(c)));
+  p = check(c, k->args[0], val_arrow(c->m, a, bool_type(c)));
   k->type = mt;
   return op3(c, OP_FILTER, carrier, 2, p, x, NULL);
 }
@@ -2111,7 +2138,7 @@ static const Value *op_result(Checker *c, const Builtin *b, const Value *fin) {
   return b->part == 0u ? fin : tyop(c, OP_FIN, 1, val_nat(c->m, b->part), NULL, NULL);
 }
 
-/* natAdd x y, ..., natEq x y (Flag), succ x: each argument : Nat. */
+/* natAdd x y, ..., natEq x y (Bool = Fin 2), succ x: each argument : Nat. */
 static const Core *rule_nat2(Call *k) {
   Checker *c = k->c;
   const Core *x = check(c, k->args[0], nat_type(c));
@@ -2140,15 +2167,57 @@ static const Core *rule_fin_op(Call *k) {
   return op3(c, k->b->op, 0, k->b->arity, n, x, y);
 }
 
-/* flagIf b yes no */
-static const Core *rule_flag_if(Call *k) {
+/* textAppend a b, textEq a b (Bool), textSlice a from to, textLength a,
+   textUtf8 a (Bool), natShow n: each argument is Text, or Nat for the
+   slice bounds and for natShow. S3 chunk B evaluates them. */
+static const Core *rule_text(Call *k) {
   Checker *c = k->c;
-  const Value *res = k->hint;
-  const Core *b = check(c, k->args[0], flag_type(c));
-  const Core *yes = b == NULL ? NULL : (res != NULL ? check(c, k->args[1], res) : infer(c, k->args[1], &res));
-  const Core *no = yes == NULL ? NULL : check(c, k->args[2], res);
-  k->type = res;
-  return op3(c, OP_FLAG_IF, 0, 3, b, yes, no);
+  Op op = k->b->op;
+  const Value *first = op == OP_NAT_SHOW ? nat_type(c) : text_type(c);
+  const Value *rest = op == OP_TEXT_SLICE ? nat_type(c) : text_type(c);
+  const Core *x = check(c, k->args[0], first);
+  const Core *y = x == NULL || k->b->arity < 2u ? NULL : check(c, k->args[1], rest);
+  const Core *z = y == NULL || k->b->arity < 3u ? NULL : check(c, k->args[2], rest);
+  k->type = op_result(c, k->b, NULL);
+  return op3(c, op, 0, k->b->arity, x, y, z);
+}
+
+/* int64Add a b, int64Sub a b, int64Mul a b, int64Neg a (Int64), int64Div a
+   b, int64Rem a b (Option Int64), int64Eq a b, int64Le a b (Bool),
+   int64ToNat a (Option Nat), natToInt64 n (Option Int64). The row result
+   OP_OPTION with part 1 is Option Nat. S3 chunk B evaluates them. */
+static const Core *rule_int64(Call *k) {
+  Checker *c = k->c;
+  Op op = k->b->op;
+  const Value *arg = op == OP_NAT_TO_INT64 ? nat_type(c) : int64_type(c);
+  const Core *x = check(c, k->args[0], arg);
+  const Core *y = x == NULL || k->b->arity < 2u ? NULL : check(c, k->args[1], arg);
+  k->type = k->b->result == OP_OPTION ? tyop(c, OP_OPTION, 1, k->b->part == 0u ? int64_type(c) : nat_type(c), NULL, NULL) : op_result(c, k->b, NULL);
+  return op3(c, op, 0, k->b->arity, x, y, NULL);
+}
+
+/* The Json type: the domain family named Json (PLAN section 5, Q7 (a)).
+   A domain without it fails with JSON_FAMILY. */
+static const Value *json_type(Checker *c) {
+  Machine *m = c->m;
+  uint32_t i;
+  for (i = 0; i < m->family_count; i++) {
+    if (strcmp(m->families[i].name, "Json") == 0)
+      return val_op(m, VAL_OP, OP_FAMILY, i, 0, NULL, 0);
+  }
+  FAIL(c, "JSON_FAMILY", "jsonParse and jsonRender need a domain family named Json");
+  return NULL;
+}
+
+/* jsonParse t : Sum Text Json, jsonRender j : Text. S3 chunk B evaluates
+   them. */
+static const Core *rule_json(Call *k) {
+  Checker *c = k->c;
+  const Value *json = json_type(c);
+  int parse = k->b->op == OP_JSON_PARSE;
+  const Core *x = json == NULL ? NULL : check(c, k->args[0], parse ? text_type(c) : json);
+  k->type = json == NULL ? NULL : parse ? tyop(c, OP_SUM, 2, text_type(c), json, NULL) : text_type(c);
+  return op3(c, k->b->op, 0, 1, x, NULL, NULL);
 }
 
 /* absurd A e (K2): A : Type n, e : Empty; the result is A. The value is
@@ -2353,8 +2422,12 @@ static const Core *rule(Call *k) {
     return rule_glue_elem(k);
   case RULE_UNGLUE:
     return rule_unglue(k);
-  case RULE_FLAG_IF:
-    return rule_flag_if(k);
+  case RULE_TEXT:
+    return rule_text(k);
+  case RULE_INT64:
+    return rule_int64(k);
+  case RULE_JSON:
+    return rule_json(k);
   case RULE_ABSURD:
     return rule_absurd(k);
   case RULE_NAT2:
@@ -2868,20 +2941,99 @@ static const Core *elab_ival(Checker *c, const Term *t, CoreKind kind, const Val
   return finish(c, core_iop(c, kind, a, b), hint, type);
 }
 
+static const Core *core_text(Checker *c, const char *bytes, uint64_t len) {
+  Core *k = new_core(c, CORE_TEXT);
+  if (k != NULL) {
+    k->name = bytes;
+    k->nat = len;
+  }
+  return k;
+}
+
+/* The little-endian base 2^32 limbs of a decimal span (ADAPT of the
+   orbit-lang u256_scale_add step to a variable limb count). The span of
+   LEN digits needs at most LEN / 9 + 2 limbs. NULL on exhaustion. */
+static const uint32_t *parse_limbs(Checker *c, const char *digits, uint32_t *count) {
+  size_t len = strlen(digits);
+  uint32_t *limbs = arena_alloc(c->m->arena, (len / 9u + 2u) * sizeof *limbs);
+  uint32_t n = 0;
+  size_t i;
+  if (limbs == NULL)
+    return NULL;
+  for (i = 0; i < len; i++) {
+    uint64_t carry = (uint64_t)(unsigned char)digits[i] - (uint64_t)'0';
+    uint32_t j;
+    for (j = 0; j < n; j++) {
+      uint64_t p = (uint64_t)limbs[j] * 10u + carry;
+      limbs[j] = (uint32_t)p;
+      carry = p >> 32;
+    }
+    if (carry != 0u)
+      limbs[n++] = (uint32_t)carry;
+  }
+  *count = n;
+  return limbs;
+}
+
+/* A Nat literal (S3 chunk A). A span at or above 2^64 arrives with nat ==
+   UINT64_MAX and its digits in name; the limb parse tells it from the
+   number 18446744073709551615 (two limbs). At a Fin n hint the literal
+   must be below n, and n must be below 2^64. At an Int64 hint the literal
+   must be at most 9223372036854775807; the leaf is a CORE_NAT with op =
+   OP_INT64, so eval reads it as an Int64. A big span otherwise is a
+   CORE_BIG of type Nat. */
+static const Core *elab_nat(Checker *c, const Term *t, const Value *hint, const Value **type) {
+  const Value *n = val_is(hint, OP_FIN) ? hint->args[0] : NULL;
+  uint32_t count = 0;
+  const uint32_t *limbs = t->nat == UINT64_MAX && t->name != NULL ? parse_limbs(c, t->name, &count) : NULL;
+  int big = limbs != NULL && count > 2u;
+  char num[24];
+  const char *span;
+  Core *k;
+  if (t->nat == UINT64_MAX && t->name != NULL && limbs == NULL)
+    return nul(FAIL(c, "OOM", "out of memory for a Nat literal"));
+  snprintf(num, sizeof num, "%llu", (unsigned long long)t->nat);
+  span = big ? t->name : num;
+  if (n != NULL && n->kind == VAL_BIG)
+    return nul(FAIL(c, "FIN_RANGE", "Fin n needs n below 2^64, so the literal %s has no type Fin n here", span));
+  if (n != NULL && n->kind == VAL_NAT) {
+    if (big || t->nat >= n->nat)
+      return nul(FAIL(c, "FIN_RANGE", "the literal %s is not below %llu, so it is not a value of Fin %llu", span, (unsigned long long)n->nat, (unsigned long long)n->nat));
+    *type = hint;
+    return core_leaf(c, CORE_NAT, t->nat);
+  }
+  if (val_is(hint, OP_INT64)) {
+    if (big || t->nat > 9223372036854775807ull)
+      return nul(FAIL(c, "TYPE_MISMATCH", "the literal %s is above 9223372036854775807, so it is not a value of Int64", span));
+    k = new_core(c, CORE_NAT);
+    if (k == NULL)
+      return NULL;
+    k->nat = t->nat;
+    k->op = OP_INT64;
+    *type = hint;
+    return k;
+  }
+  *type = nat_type(c);
+  if (!big)
+    return finish(c, core_leaf(c, CORE_NAT, t->nat), hint, type);
+  k = new_core(c, CORE_BIG);
+  if (k == NULL)
+    return NULL;
+  k->limbs = limbs;
+  k->nat = count;
+  return finish(c, k, hint, type);
+}
+
 static const Core *elab_inner(Checker *c, const Term *t, const Value *hint, const Value **type) {
   switch (t->kind) {
   case TERM_VAR:
   case TERM_APP:
     return elab_spine(c, t, hint, type);
   case TERM_NAT:
-    if (val_is(hint, OP_FIN) && hint->args[0]->kind == VAL_NAT) {
-      if (t->nat >= hint->args[0]->nat)
-        return nul(FAIL(c, "FIN_RANGE", "the literal %llu is not below %llu, so it is not a value of Fin %llu", (unsigned long long)t->nat, (unsigned long long)hint->args[0]->nat, (unsigned long long)hint->args[0]->nat));
-      *type = hint;
-      return core_leaf(c, CORE_NAT, t->nat);
-    }
-    *type = nat_type(c);
-    return finish(c, core_leaf(c, CORE_NAT, t->nat), hint, type);
+    return elab_nat(c, t, hint, type);
+  case TERM_TEXT:
+    *type = text_type(c);
+    return finish(c, core_text(c, t->name, t->nat), hint, type);
   case TERM_LAM:
     return hint != NULL ? check_lam(c, t, hint, type) : infer_lam(c, t, type);
   case TERM_PI:
@@ -2923,10 +3075,6 @@ static const char *name_owner(const Checker *c, const char *name) {
   const Machine *m = c->m;
   uint32_t i;
   uint32_t j;
-  for (i = 0; i < sizeof RESERVED / sizeof RESERVED[0]; i++) {
-    if (strcmp(RESERVED[i], name) == 0)
-      return "a reserved name";
-  }
   for (i = 0; i < BUILTIN_COUNT; i++) {
     if (strcmp(BUILTINS[i].name, name) == 0)
       return "a core name";
@@ -2947,6 +3095,15 @@ static const char *name_owner(const Checker *c, const char *name) {
   if (i == NO_DEF)
     return NULL;
   return m->defs[i].origin == ORIGIN_DOMAIN ? "a domain definition" : "already defined";
+}
+
+static int is_reserved(const char *name) {
+  uint32_t i;
+  for (i = 0; i < sizeof RESERVED / sizeof RESERVED[0]; i++) {
+    if (strcmp(RESERVED[i], name) == 0)
+      return 1;
+  }
+  return 0;
 }
 
 static int name_free(Checker *c, const char *name) {
@@ -3405,6 +3562,8 @@ static int check_decl(Checker *c, const Decl *d) {
     return FAIL(c, "REFUSE_AXIOM", "an axiom has no proof (rule R2)");
   if (d->is_rec)
     return FAIL(c, "REFUSE_REC", "def rec is refused (rule R3); use fold or unfold");
+  if (d->origin == ORIGIN_PROGRAM && is_reserved(d->name))
+    return FAIL(c, "REFUSE_NAME", "%s is a reserved name (rule R4)", d->name);
   if (!name_free(c, d->name))
     return 0;
   return d->kind == DECL_FAMILY ? check_family(c, d) : check_def(c, d);
@@ -3458,31 +3617,25 @@ static uint64_t fin_literal(const Value *t) {
   return n != NULL && n->kind == VAL_NAT ? n->nat : 0u;
 }
 
-/* A first-order type: Nat (BOUND 0), Flag (BOUND 0, *FLAG 1), or Fin n at a
-   literal n that is not 0 (BOUND n). */
-static int first_order(const Value *t, uint64_t *bound, int *flag) {
+/* A first-order type: Nat (BOUND 0) or Fin n at a literal n that is not 0
+   (BOUND n). */
+static int first_order(const Value *t, uint64_t *bound) {
   *bound = fin_literal(t);
-  *flag = t != NULL && val_is(t, OP_FLAG);
-  return (t != NULL && val_is(t, OP_NAT)) || *flag || *bound != 0u;
+  return (t != NULL && val_is(t, OP_NAT)) || *bound != 0u;
 }
 
 int entry_of(Machine *m, const Value *type, Entry *out) {
   const Value *t = type;
   uint64_t bound = 0;
-  int flag = 0;
   memset(out, 0, sizeof *out);
   while (t != NULL && t->kind == VAL_PI && out->param_count < ENTRY_PARAMS_MAX) {
-    if (!first_order(t->dom, &bound, &flag))
+    if (!first_order(t->dom, &bound))
       return 0;
     out->param_bound[out->param_count] = bound;
-    out->param_flag[out->param_count] = flag;
     t = closure_apply(m, t, val_var(m, out->param_count));
     out->param_count++;
   }
-  if (!first_order(t, &bound, &flag))
-    return 0;
-  out->result_flag = flag;
-  return 1;
+  return first_order(t, &bound);
 }
 
 static int parse_u64(const char *s, uint64_t *out) {
@@ -3500,15 +3653,11 @@ static int parse_u64(const char *s, uint64_t *out) {
   return 1;
 }
 
-/* An entry argument: a Nat in decimal, a Flag as 0 or 1 (IS_FLAG), or a Fin n
-   as a decimal below n (BOUND is n, or 0 for a Nat or a Flag). */
-static const Value *entry_arg(Machine *m, const char *text, uint64_t bound, int is_flag) {
+/* An entry argument: a Nat in decimal, or a Fin n as a decimal below n
+   (BOUND is n, or 0 for a Nat). */
+static const Value *entry_arg(Machine *m, const char *text, uint64_t bound) {
   uint64_t n = 0;
-  if (is_flag && parse_u64(text, &n) && n <= 1u)
-    return val_make(m, n == 1u ? OP_FLAG_YES : OP_FLAG_NO, 0, 0, NULL, NULL, NULL);
-  if (is_flag)
-    diag_fail(m->diag, "EVAL_ARGS", m->def, "'%s' is not a Flag (0 or 1)", text);
-  else if (parse_u64(text, &n) && (bound == 0u || n < bound))
+  if (parse_u64(text, &n) && (bound == 0u || n < bound))
     return val_nat(m, n);
   else if (bound == 0u)
     diag_fail(m->diag, "EVAL_ARGS", m->def, "'%s' is not a Nat (0 to 2^64-1)", text);
@@ -3527,11 +3676,6 @@ static int print_result(Machine *m, const char *name, const Value *v, FILE *out,
     fprintf(err, "langc: EVAL_OVERFLOW: %s: a Nat operation overflowed past 2^64-1\n", name);
     return 0;
   case VAL_OP:
-    if (val_is(v, OP_FLAG_YES) || val_is(v, OP_FLAG_NO)) {
-      fprintf(out, "%d\n", val_is(v, OP_FLAG_YES));
-      return 0;
-    }
-    break;
   case VAL_UNIV:
   case VAL_LAM:
   case VAL_PI:
@@ -3543,6 +3687,9 @@ static int print_result(Machine *m, const char *name, const Value *v, FILE *out,
   case VAL_PATHP:
   case VAL_IVAL:
   case VAL_PAPP:
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
     break;
   }
   diag_fail(m->diag, "EVAL_ENTRY", name, "the entry did not compute a number");
@@ -3583,7 +3730,7 @@ int eval_command(Machine *m, const char *name, char *const *args, int arg_count,
     return 2;
   }
   for (i = 0; i < entry.param_count && v != NULL; i++) {
-    const Value *arg = entry_arg(m, args[i], entry.param_bound[i], entry.param_flag[i]);
+    const Value *arg = entry_arg(m, args[i], entry.param_bound[i]);
     v = arg == NULL ? NULL : apply_value(m, v, arg);
   }
   if (v == NULL)

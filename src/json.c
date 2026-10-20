@@ -71,6 +71,9 @@ static int internal(Out *o, const char *what) {
 /* 1 when V is a number or a canonical value. A trap is a compile error. */
 static int ready(Out *o, const Value *v) {
   switch (v->kind) {
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_OP:
   case VAL_PLAM:
@@ -205,10 +208,13 @@ static int op_json(Out *o, const Value *type, const Value *v) {
       return internal(o, "a Nat or Fin value that is not a number");
     snprintf(num, sizeof num, "%llu", (unsigned long long)v->nat);
     return put_text(o, num);
-  case OP_FLAG:
-    if (val_is(v, OP_FLAG_YES))
-      return put_text(o, "true");
-    return val_is(v, OP_FLAG_NO) ? put_text(o, "false") : internal(o, "a Flag value that is not yes or no");
+  case OP_TEXT:
+    return internal(o, "a Text value (S3 chunk B)");
+  case OP_INT64:
+    if (v->kind != VAL_INT64)
+      return internal(o, "an Int64 value that is not a number");
+    snprintf(num, sizeof num, "%lld", (long long)v->i64);
+    return put_text(o, num);
   case OP_UNIT:
     return put_text(o, "{}");
   case OP_EMPTY:
@@ -229,8 +235,6 @@ static int op_json(Out *o, const Value *type, const Value *v) {
   case OP_GLUE:
     return refuse(o, "a Glue element");
   case OP_UNIT_VAL:
-  case OP_FLAG_YES:
-  case OP_FLAG_NO:
   case OP_PAIR:
   case OP_INL:
   case OP_INR:
@@ -265,7 +269,24 @@ static int op_json(Out *o, const Value *type, const Value *v) {
   case OP_SUCC:
   case OP_NAT_EQ:
   case OP_NAT_LE:
-  case OP_FLAG_IF:
+  case OP_TEXT_APPEND:
+  case OP_TEXT_EQ:
+  case OP_TEXT_SLICE:
+  case OP_TEXT_LENGTH:
+  case OP_TEXT_UTF8:
+  case OP_NAT_SHOW:
+  case OP_INT64_ADD:
+  case OP_INT64_SUB:
+  case OP_INT64_MUL:
+  case OP_INT64_NEG:
+  case OP_INT64_DIV:
+  case OP_INT64_REM:
+  case OP_INT64_EQ:
+  case OP_INT64_LE:
+  case OP_INT64_TO_NAT:
+  case OP_NAT_TO_INT64:
+  case OP_JSON_PARSE:
+  case OP_JSON_RENDER:
   case OP_ABSURD:
   case OP_PROJ:
   case OP_FIN_ADD:
@@ -331,6 +352,8 @@ static int mentions(const Core *c, uint32_t index) {
     return c->index == index;
   case CORE_GLOBAL:
   case CORE_NAT:
+  case CORE_TEXT:
+  case CORE_BIG:
   case CORE_TRAP:
   case CORE_UNIV:
   case CORE_IZERO:
@@ -653,6 +676,9 @@ static int typed_json(Out *o, const Value *type, const Value *v) {
     return pack_json(o, type, v);
   case VAL_PATHP:
     return path_json(o, type, v);
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_PI:
     return refuse(o, "a function");
   case VAL_UNIV:
@@ -691,6 +717,9 @@ static int is_instance(const DefInfo *d) {
   switch (d->type->kind) {
   case VAL_PI:
   case VAL_UNIV:
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
     return 0;
   case VAL_OP:
   case VAL_PATHP:

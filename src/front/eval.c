@@ -9,9 +9,9 @@
 #define VARIES 0xffu
 
 static const char *const OP_NAMES[] = {
-  [OP_NAT] = "Nat", [OP_FLAG] = "Flag", [OP_UNIT] = "Unit", [OP_PROD] = "Prod",
+  [OP_NAT] = "Nat", [OP_TEXT] = "Text", [OP_INT64] = "Int64", [OP_UNIT] = "Unit", [OP_PROD] = "Prod",
   [OP_SUM] = "Sum", [OP_OPTION] = "Option", [OP_LIST] = "List",
-  [OP_FAMILY] = "?", [OP_UNIT_VAL] = "unit", [OP_FLAG_YES] = "flagYes", [OP_FLAG_NO] = "flagNo",
+  [OP_FAMILY] = "?", [OP_UNIT_VAL] = "unit",
   [OP_PAIR] = "pair", [OP_INL] = "inl", [OP_INR] = "inr",
   [OP_NONE] = "none", [OP_SOME] = "some", [OP_NIL] = "nil", [OP_CONS] = "cons",
   [OP_PACK] = "pack", [OP_CTOR] = "?", [OP_FIRST] = "first",
@@ -21,7 +21,7 @@ static const char *const OP_NAMES[] = {
   [OP_FILTER] = "filter", [OP_WITNESS] = "witness", [OP_PAYLOAD] = "payload",
   [OP_NAT_ADD] = "natAdd", [OP_NAT_SUB] = "natSub",
   [OP_NAT_MUL] = "natMul", [OP_SUCC] = "succ", [OP_NAT_EQ] = "natEq",
-  [OP_NAT_LE] = "natLe", [OP_FLAG_IF] = "flagIf",
+  [OP_NAT_LE] = "natLe",
   [OP_PROJ] = "?",
   [OP_INTERVAL] = "I", [OP_TRANSP] = "transp",
   [OP_SYSTEM] = "system", [OP_HCOMP] = "hcomp", [OP_FIN] = "Fin",
@@ -29,15 +29,15 @@ static const char *const OP_NAMES[] = {
   [OP_FIN_VAL] = "finVal", [OP_FIN_EQ] = "finEq", [OP_FIN_CASE] = "finCase",
   [OP_DEC_EQ_FIN] = "decEqFin", [OP_DEC_EQ_NAT] = "decEqNat",
   [OP_GLUE] = "Glue", [OP_GLUE_ELEM] = "glue", [OP_UNGLUE] = "unglue",
-  [OP_EMPTY] = "Empty", [OP_ELIM] = "elim", [OP_ABSURD] = "absurd"
+  [OP_EMPTY] = "Empty", [OP_ELIM] = "elim", [OP_ABSURD] = "absurd", [OP_TEXT_APPEND] = "textAppend", [OP_TEXT_EQ] = "textEq", [OP_TEXT_SLICE] = "textSlice", [OP_TEXT_LENGTH] = "textLength", [OP_TEXT_UTF8] = "textUtf8", [OP_NAT_SHOW] = "natShow", [OP_INT64_ADD] = "int64Add", [OP_INT64_SUB] = "int64Sub", [OP_INT64_MUL] = "int64Mul", [OP_INT64_NEG] = "int64Neg", [OP_INT64_DIV] = "int64Div", [OP_INT64_REM] = "int64Rem", [OP_INT64_EQ] = "int64Eq", [OP_INT64_LE] = "int64Le", [OP_INT64_TO_NAT] = "int64ToNat", [OP_NAT_TO_INT64] = "natToInt64", [OP_JSON_PARSE] = "jsonParse", [OP_JSON_RENDER] = "jsonRender"
 };
 
 /* The number of arguments of each operation. VARIES: it comes from the
    family tables. */
 static const unsigned char OP_ARITY[] = {
-  [OP_NAT] = 0, [OP_FLAG] = 0, [OP_UNIT] = 0, [OP_PROD] = 2, [OP_SUM] = 2,
+  [OP_NAT] = 0, [OP_TEXT] = 0, [OP_INT64] = 0, [OP_UNIT] = 0, [OP_PROD] = 2, [OP_SUM] = 2,
   [OP_OPTION] = 1, [OP_LIST] = 1, [OP_FAMILY] = VARIES,
-  [OP_UNIT_VAL] = 0, [OP_FLAG_YES] = 0, [OP_FLAG_NO] = 0, [OP_PAIR] = 2,
+  [OP_UNIT_VAL] = 0, [OP_PAIR] = 2,
   [OP_INL] = 1, [OP_INR] = 1, [OP_NONE] = 0, [OP_SOME] = 1, [OP_NIL] = 0,
   [OP_CONS] = 2, [OP_PACK] = 2, [OP_CTOR] = VARIES, [OP_FIRST] = 1,
   [OP_SECOND] = 1, [OP_EITHER] = 3, [OP_OPTION_ELIM] = 3, [OP_PURE] = 1,
@@ -45,13 +45,13 @@ static const unsigned char OP_ARITY[] = {
   [OP_FOLD_FAMILY] = VARIES, [OP_UNFOLD] = 3, [OP_FILTER] = 2, [OP_WITNESS] = 1,
   [OP_PAYLOAD] = 1,
   [OP_NAT_ADD] = 2, [OP_NAT_SUB] = 2, [OP_NAT_MUL] = 2, [OP_SUCC] = 1,
-  [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_FLAG_IF] = 3, [OP_PROJ] = 1,
+  [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_PROJ] = 1,
   [OP_INTERVAL] = 0, [OP_TRANSP] = 3,
   [OP_SYSTEM] = VARIES, [OP_HCOMP] = 4, [OP_FIN] = 1, [OP_FIN_ADD] = 3,
   [OP_FIN_NEG] = 2, [OP_FIN_MUL] = 3, [OP_FIN_VAL] = 2, [OP_FIN_EQ] = 3,
   [OP_FIN_CASE] = VARIES, [OP_DEC_EQ_FIN] = 3, [OP_DEC_EQ_NAT] = 2,
   [OP_GLUE] = 3, [OP_GLUE_ELEM] = 3,
-  [OP_UNGLUE] = 4, [OP_EMPTY] = 0, [OP_ELIM] = VARIES, [OP_ABSURD] = 2
+  [OP_UNGLUE] = 4, [OP_EMPTY] = 0, [OP_ELIM] = VARIES, [OP_ABSURD] = 2, [OP_TEXT_APPEND] = 2, [OP_TEXT_EQ] = 2, [OP_TEXT_SLICE] = 3, [OP_TEXT_LENGTH] = 1, [OP_TEXT_UTF8] = 1, [OP_NAT_SHOW] = 1, [OP_INT64_ADD] = 2, [OP_INT64_SUB] = 2, [OP_INT64_MUL] = 2, [OP_INT64_NEG] = 1, [OP_INT64_DIV] = 2, [OP_INT64_REM] = 2, [OP_INT64_EQ] = 2, [OP_INT64_LE] = 2, [OP_INT64_TO_NAT] = 1, [OP_NAT_TO_INT64] = 1, [OP_JSON_PARSE] = 1, [OP_JSON_RENDER] = 1
 };
 
 typedef enum {
@@ -115,6 +115,31 @@ const Value *val_nat(Machine *m, uint64_t n) {
   Value *v = new_value(m, VAL_NAT);
   if (v != NULL)
     v->nat = n;
+  return v;
+}
+
+const Value *val_text(Machine *m, const char *bytes, uint64_t len) {
+  Value *v = new_value(m, VAL_TEXT);
+  if (v != NULL) {
+    v->name = bytes;
+    v->nat = len;
+  }
+  return v;
+}
+
+const Value *val_int64(Machine *m, int64_t n) {
+  Value *v = new_value(m, VAL_INT64);
+  if (v != NULL)
+    v->i64 = n;
+  return v;
+}
+
+const Value *val_big(Machine *m, const uint32_t *limbs, uint64_t count) {
+  Value *v = new_value(m, VAL_BIG);
+  if (v != NULL) {
+    v->limbs = limbs;
+    v->nat = count;
+  }
   return v;
 }
 
@@ -445,8 +470,9 @@ static const Value *constant(Machine *m, Op op) {
   return make(m, VAL_OP, op, 0, 0, NULL, NULL, NULL);
 }
 
-static const Value *flag(Machine *m, int yes) {
-  return constant(m, yes ? OP_FLAG_YES : OP_FLAG_NO);
+/* A Bool (Fin 2) value: 1 for yes, 0 for no. */
+static const Value *bool_val(Machine *m, int yes) {
+  return val_nat(m, yes ? 1u : 0u);
 }
 
 const Value *val_arrow(Machine *m, const Value *dom, const Value *cod) {
@@ -521,6 +547,9 @@ static Scrut scrut_of(const Value *v) {
   case VAL_STUCK:
   case VAL_PAPP:
     return SCRUT_NEUTRAL;
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_UNIV:
   case VAL_LAM:
@@ -636,6 +665,9 @@ const Value *apply_value(Machine *m, const Value *fn, const Value *arg) {
     v->dom = fn;
     v->arg = arg;
     return v;
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_UNIV:
   case VAL_PI:
@@ -1169,7 +1201,7 @@ static const Value *filter_option(Machine *m, const Value *const *a, uint32_t n)
     return NULL;
   if (blocked(m, test, OP_FILTER, CARRIER_OPTION, 0, a, n, &out))
     return out;
-  return val_is(test, OP_FLAG_YES) ? a[1] : constant(m, OP_NONE);
+  return test->kind == VAL_NAT && test->nat == 1u ? a[1] : constant(m, OP_NONE);
 }
 
 static const Value *filter_list(Machine *m, const Value *const *a) {
@@ -1192,7 +1224,7 @@ static const Value *filter_list(Machine *m, const Value *const *a) {
     case SCRUT_VALUE:
       break;
     }
-    if (val_is(test, OP_FLAG_YES) && !buf_push(m, &kept, s.cells[i]->args[0]))
+    if (test->kind == VAL_NAT && test->nat == 1u && !buf_push(m, &kept, s.cells[i]->args[0]))
       return NULL;
   }
   return build_list(m, kept.items, kept.count, list_tail(m, s.tail, OP_FILTER, CARRIER_LIST, a[0]));
@@ -1437,8 +1469,8 @@ static const Core *core_var(Machine *m, uint32_t index) {
 }
 
 /* Refute `Path T X Y` at distinct literals by transporting unit along a
-   line from Unit to Empty. finEq returns Fin 2, while natEq returns Flag,
-   so each line uses its corresponding eliminator. Under the two binders
+   line from Unit to Empty. finEq and natEq both return Fin 2 (Bool), so
+   the line is a finCase on the test. Under the two binders
    p is index 1 and i is index 0. The ends of p are the literals. */
 static const Core *refute_core(Machine *m, int fin, uint64_t k, uint64_t x, uint64_t y) {
   const Core *args[3];
@@ -1463,16 +1495,14 @@ static const Core *refute_core(Machine *m, int fin, uint64_t k, uint64_t x, uint
   args[1] = core_leaf(m, CORE_NAT, x);
   args[2] = at;
   args[0] = fin ? core_opn(m, OP_FIN_EQ, args, 3) : core_opn(m, OP_NAT_EQ, args + 1, 2);
-  args[1] = core_opn(m, fin ? OP_EMPTY : OP_UNIT, NULL, 0);
-  args[2] = core_opn(m, fin ? OP_UNIT : OP_EMPTY, NULL, 0);
-  cases = (Core *)core_opn(m, fin ? OP_FIN_CASE : OP_FLAG_IF, args, 3);
+  args[1] = core_opn(m, OP_EMPTY, NULL, 0);
+  args[2] = core_opn(m, OP_UNIT, NULL, 0);
+  cases = (Core *)core_opn(m, OP_FIN_CASE, args, 3);
   if (cases == NULL)
     return NULL;
-  if (fin) {
-    cases->a = core_leaf(m, CORE_UNIV, 0);
-    if (cases->a == NULL)
-      return NULL;
-  }
+  cases->a = core_leaf(m, CORE_UNIV, 0);
+  if (cases->a == NULL)
+    return NULL;
   args[0] = core_binder(m, CORE_PLAM, "i", cases);
   args[1] = core_leaf(m, CORE_IZERO, 0);
   args[2] = core_opn(m, OP_UNIT_VAL, NULL, 0);
@@ -1519,18 +1549,7 @@ static const Value *nat_test(Machine *m, Op op, const Value *const *a, uint32_t 
   uint64_t y = 0;
   if (!nat_args(m, op, a, n, &x, &y, &out))
     return out;
-  return flag(m, op == OP_NAT_EQ ? x == y : x <= y);
-}
-
-static const Value *reduce_flag_if(Machine *m, const Value *const *a, uint32_t n) {
-  const Value *out;
-  if (blocked(m, a[0], OP_FLAG_IF, 0, 0, a, n, &out))
-    return out;
-  if (val_is(a[0], OP_FLAG_YES))
-    return a[1];
-  if (val_is(a[0], OP_FLAG_NO))
-    return a[2];
-  return internal(m, "a flagIf of a value that is not a Flag");
+  return bool_val(m, op == OP_NAT_EQ ? x == y : x <= y);
 }
 
 static const Value *reduce_proj(Machine *m, uint32_t inst, uint32_t field, const Value *const *a, uint32_t n) {
@@ -1968,7 +1987,8 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
   switch (head->op) {
   case OP_NAT:
   case OP_FIN:
-  case OP_FLAG:
+  case OP_TEXT:
+  case OP_INT64:
   case OP_EMPTY:
   case OP_UNIT:
     return base;
@@ -2013,8 +2033,6 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
     return transp_glue(m, line, phi, base);
   case OP_INTERVAL:
   case OP_UNIT_VAL:
-  case OP_FLAG_YES:
-  case OP_FLAG_NO:
   case OP_PAIR:
   case OP_INL:
   case OP_INR:
@@ -2045,7 +2063,24 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
   case OP_SUCC:
   case OP_NAT_EQ:
   case OP_NAT_LE:
-  case OP_FLAG_IF:
+  case OP_TEXT_APPEND:
+  case OP_TEXT_EQ:
+  case OP_TEXT_SLICE:
+  case OP_TEXT_LENGTH:
+  case OP_TEXT_UTF8:
+  case OP_NAT_SHOW:
+  case OP_INT64_ADD:
+  case OP_INT64_SUB:
+  case OP_INT64_MUL:
+  case OP_INT64_NEG:
+  case OP_INT64_DIV:
+  case OP_INT64_REM:
+  case OP_INT64_EQ:
+  case OP_INT64_LE:
+  case OP_INT64_TO_NAT:
+  case OP_NAT_TO_INT64:
+  case OP_JSON_PARSE:
+  case OP_JSON_RENDER:
   case OP_ABSURD:
   case OP_PROJ:
   case OP_TRANSP:
@@ -2104,6 +2139,9 @@ static const Value *transp(Machine *m, const Value *line, const Value *phi, cons
     return transp_sigma(m, line, face, base);
   case VAL_TRAP:
     return head;
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_LAM:
   case VAL_PLAM:
@@ -2299,8 +2337,8 @@ static int same_head_at(Machine *m, const Value *b, const Value *v) {
   const Value *x = closure_apply(m, b, fresh_ivar(m));
   if (x == NULL)
     return 0;
-  if (v->kind == VAL_NAT)
-    return x->kind == VAL_NAT && x->nat == v->nat;
+  if (v->kind == VAL_NAT || v->kind == VAL_TEXT || v->kind == VAL_INT64 || v->kind == VAL_BIG)
+    return x->kind == v->kind && conv_values(m, 0, x, v);
   return x->kind == VAL_OP && x->op == v->op && x->inst == v->inst && x->argc == v->argc;
 }
 
@@ -2314,7 +2352,8 @@ static const Value *hcomp_data(Machine *m, const Value *ty, const Value *phi, co
   uint32_t k;
   if (hit_type(m, ty))
     return hcomp_formal(m, ty, phi, sys, base);
-  if (val_is(ty, OP_FAMILY) || scrut_of(base) == SCRUT_NEUTRAL || (base->kind != VAL_NAT && base->kind != VAL_OP))
+  if (val_is(ty, OP_FAMILY) || scrut_of(base) == SCRUT_NEUTRAL ||
+      (base->kind != VAL_NAT && base->kind != VAL_TEXT && base->kind != VAL_INT64 && base->kind != VAL_BIG && base->kind != VAL_OP))
     return hcomp_stuck(m, ty, phi, sys, base);
   for (k = 0; k + 1u < sys->argc; k += 2u)
     if (!ival_is_end(face_norm(m, sys->args[k]), 0) && !same_head_at(m, sys->args[k + 1u], base))
@@ -2432,6 +2471,9 @@ static const Value *hcomp(Machine *m, const Value *ty, const Value *phi, const V
     return hcomp_univ(m, face, sys, base);
   case VAL_TRAP:
     return ty;
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_LAM:
   case VAL_PLAM:
@@ -2681,6 +2723,9 @@ static const Value *val_isubst(Machine *m, const Value *v, uint32_t level, const
     r = ival_replace(m, v, level, s);
     break;
   case VAL_UNIV:
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_VAR:
   case VAL_TRAP:
@@ -2953,7 +2998,8 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   switch (op) {
   case OP_NAT:
   case OP_FIN:
-  case OP_FLAG:
+  case OP_TEXT:
+  case OP_INT64:
   case OP_EMPTY:
   case OP_UNIT:
   case OP_PROD:
@@ -2963,8 +3009,6 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_INTERVAL:
   case OP_FAMILY:
   case OP_UNIT_VAL:
-  case OP_FLAG_YES:
-  case OP_FLAG_NO:
   case OP_PAIR:
   case OP_INL:
   case OP_INR:
@@ -3034,8 +3078,25 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_NAT_EQ:
   case OP_NAT_LE:
     return nat_test(m, op, a, n);
-  case OP_FLAG_IF:
-    return reduce_flag_if(m, a, n);
+  case OP_TEXT_APPEND:
+  case OP_TEXT_EQ:
+  case OP_TEXT_SLICE:
+  case OP_TEXT_LENGTH:
+  case OP_TEXT_UTF8:
+  case OP_NAT_SHOW:
+  case OP_INT64_ADD:
+  case OP_INT64_SUB:
+  case OP_INT64_MUL:
+  case OP_INT64_NEG:
+  case OP_INT64_DIV:
+  case OP_INT64_REM:
+  case OP_INT64_EQ:
+  case OP_INT64_LE:
+  case OP_INT64_TO_NAT:
+  case OP_NAT_TO_INT64:
+  case OP_JSON_PARSE:
+  case OP_JSON_RENDER:
+    return val_op(m, VAL_STUCK, op, 0, 0, a, n); /* S3 chunk B evaluates it */
   case OP_ABSURD:
     return val_op(m, VAL_STUCK, OP_ABSURD, 0, 0, a, n);
   case OP_PROJ:
@@ -3100,7 +3161,11 @@ static const Value *eval_inner(Machine *m, const Env *env, const Core *c) {
   case CORE_GLOBAL:
     return def_value(m, c->index);
   case CORE_NAT:
-    return val_nat(m, c->nat);
+    return c->op == OP_INT64 ? val_int64(m, (int64_t)c->nat) : val_nat(m, c->nat);
+  case CORE_TEXT:
+    return val_text(m, c->name, c->nat);
+  case CORE_BIG:
+    return val_big(m, c->limbs, c->nat);
   case CORE_TRAP:
     return val_trap(m);
   case CORE_UNIV:
@@ -3219,6 +3284,12 @@ static int conv_loop(Machine *m, uint32_t level, const Value *a, const Value *b)
     case VAL_UNIV:
     case VAL_VAR:
       return a->nat == b->nat;
+    case VAL_INT64:
+      return a->i64 == b->i64;
+    case VAL_TEXT:
+      return a->nat == b->nat && memcmp(a->name, b->name, (size_t)a->nat) == 0;
+    case VAL_BIG:
+      return a->nat == b->nat && memcmp(a->limbs, b->limbs, (size_t)a->nat * sizeof *a->limbs) == 0;
     case VAL_TRAP:
       return 1;
     case VAL_LAM:
@@ -3432,10 +3503,37 @@ static const Core *quote_op(Machine *m, uint32_t level, const Value *v) {
   return c;
 }
 
+/* S3 chunk A: a Text or a big Nat quotes to its literal. */
+static const Core *quote_literal(Machine *m, CoreKind kind, const Value *v) {
+  Core *k = new_core(m, kind);
+  if (k == NULL)
+    return NULL;
+  k->nat = v->nat;
+  k->name = v->name;
+  k->limbs = v->limbs;
+  return k;
+}
+
+/* An Int64 quotes to a CORE_NAT marked op = OP_INT64. */
+static const Core *quote_int64(Machine *m, const Value *v) {
+  Core *k = new_core(m, CORE_NAT);
+  if (k == NULL)
+    return NULL;
+  k->nat = (uint64_t)v->i64;
+  k->op = OP_INT64;
+  return k;
+}
+
 static const Core *quote_inner(Machine *m, uint32_t level, const Value *v) {
   switch (v->kind) {
   case VAL_NAT:
     return core_leaf(m, CORE_NAT, v->nat);
+  case VAL_INT64:
+    return quote_int64(m, v);
+  case VAL_TEXT:
+    return quote_literal(m, CORE_TEXT, v);
+  case VAL_BIG:
+    return quote_literal(m, CORE_BIG, v);
   case VAL_TRAP:
     return core_leaf(m, CORE_TRAP, 0);
   case VAL_UNIV:
@@ -3609,6 +3707,9 @@ static void print_binder(Printer *p, const Value *v) {
     print_value(p, v->dom, 0);
     put(p, ") ");
     break;
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_TRAP:
   case VAL_UNIV:
@@ -3732,6 +3833,33 @@ static void print_typed_case(Printer *p, const Value *v) {
   put(p, ")");
 }
 
+/* A Text in double quotes: \" \\ \n \t, and \xHH for every other byte
+   outside 0x20 to 0x7e. */
+static void print_text(Printer *p, const Value *v) {
+  static const char hex[] = "0123456789abcdef";
+  char buf[5];
+  uint64_t i;
+  put(p, "\"");
+  for (i = 0; i < v->nat; i++) {
+    unsigned char b = (unsigned char)v->name[i];
+    const char *esc = b == '"' ? "\\\"" : b == '\\' ? "\\\\" : b == '\n' ? "\\n" : b == '\t' ? "\\t" : NULL;
+    if (esc == NULL && b >= 0x20u && b <= 0x7eu) {
+      buf[0] = (char)b;
+      buf[1] = '\0';
+      esc = buf;
+    } else if (esc == NULL) {
+      buf[0] = '\\';
+      buf[1] = 'x';
+      buf[2] = hex[b >> 4];
+      buf[3] = hex[b & 15u];
+      buf[4] = '\0';
+      esc = buf;
+    }
+    put(p, esc);
+  }
+  put(p, "\"");
+}
+
 static void print_other(Printer *p, const Value *v, int atom) {
   char num[32];
   if (v == NULL) {
@@ -3750,6 +3878,16 @@ static void print_other(Printer *p, const Value *v, int atom) {
   case VAL_NAT:
     snprintf(num, sizeof num, "%llu", (unsigned long long)v->nat);
     put(p, num);
+    return;
+  case VAL_INT64:
+    snprintf(num, sizeof num, "%lld", (long long)v->i64);
+    put(p, num);
+    return;
+  case VAL_BIG:
+    put(p, "<big>");
+    return;
+  case VAL_TEXT:
+    print_text(p, v);
     return;
   case VAL_TRAP:
     put(p, "trap");
@@ -3798,6 +3936,9 @@ static void print_other(Printer *p, const Value *v, int atom) {
     put(p, " @ ");
     print_value(p, v->arg, 1);
     break;
+  case VAL_TEXT:
+  case VAL_INT64:
+  case VAL_BIG:
   case VAL_NAT:
   case VAL_TRAP:
   case VAL_VAR:

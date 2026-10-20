@@ -1,5 +1,5 @@
 bad-char.lang LEX_CHAR
-nat-range.lang LEX_NAT_RANGE
+nat-range.lang FIN_RANGE
 string.lang LEX_CHAR
 unclosed.lang PARSE_EXPECT
 no-body.lang PARSE_EXPECT
@@ -9,3 +9,5 @@ type-no-level.lang PARSE_EXPECT
 deep.lang PARSE_DEPTH
 dangling-at.lang PARSE_EXPECT
 system-top.lang PARSE_EXPECT
+text-unterminated.lang LEX_STR_OPEN
+text-escape.lang LEX_STR_ESCAPE

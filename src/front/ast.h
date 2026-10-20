@@ -7,7 +7,8 @@
 
 typedef enum {
   TERM_VAR,   /* name */
-  TERM_NAT,   /* nat */
+  TERM_NAT,   /* nat; name: the digit span when nat is UINT64_MAX (S3) */
+  TERM_TEXT,  /* name: the bytes, nat: their length */
   TERM_APP,   /* left applied to right */
   TERM_LAM,   /* fun (name : left) => right; left is NULL for a bare binder */
   TERM_PI,    /* (name : left) -> right; name is NULL for left -> right */
