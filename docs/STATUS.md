@@ -111,3 +111,148 @@ Formal `hcomp` JSON retains its tube as source syntax alongside the face
 and base. Previously, two circle paths with different tubes serialized
 identically even though their transports returned 1 and 2. A new regression
 requires distinct JSON for these distinct paths.
+
+## S2: the orbit-lang QIIT and HIIT port (2026-10-19)
+
+S2 ports the orbit-lang indexed families, mutual blocks and the family
+eliminator from the donor commits 6fa6a15, 8dd82a3, 8b11846 and 676c7a8
+(the diffs of the front files, not the files). The USER rulings Q1 to Q9
+are each (a) (`docs/PLAN.md`, section 1). Chunk C writes this section in
+full.
+
+### Chunk A: grammar, core and check
+
+Chunk A adds the grammar (`and`, the index telescope, the constructor
+result, `elim`), the core fields and the Op `OP_ELIM`, the check of
+indexed families, blocks, block folds and the eliminator, the domain
+families `Vec` and the `Charter`/`Ratified` block, 6 check rows and 15
+path regression cases. The eval of the folds and of `elim` is chunk B:
+eval.c has `varied_arity`, `transp_data`, `block_ctors` and a `stuck_elim`
+stub only.
+
+| Suite | Count |
+|---|---|
+| examples | 20 checked, 0 failed |
+| parse refusals | 11 |
+| check refusals | 66 |
+| evals | 48 |
+| json builds | 20 |
+| build refusals | 3 |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 82 checked, 0 failed |
+
+Check rows (test/check, each TYPE_MISMATCH): indexed-fold-missing-case (a
+Vec fold with the vnil and vcons cases and no vswap case),
+block-fold-target (a Charter block fold with one target),
+block-fold-missing-case (a Charter block fold without the ratify case),
+elim-family-count (a Vec elim with two cases), elim-motive-index (a Vec
+elim whose motive has no index binder), elim-block (an elim on a Charter
+value, Q7 (a)).
+
+Path regression cases (test/path-regressions.c, cases 68 to 82): an end
+at another index (HIT_INDEX), a constructor without a result (HIT_INDEX),
+a result head that is not the family (HIT_INDEX), a header that names a
+later sort (BLOCK_ORDER), a field that names a later sort (accepted), a
+block fold with an extra argument before the value (TYPE_MISMATCH), a
+header fold of the sort under check (HIT_BOUNDARY), the block universe at
+Type 0 (TYPE_MISMATCH) and at Type 1 (accepted), two higher-order index
+telescopes (accepted), a block fold with the same parameter telescope
+(accepted) and with a different one (TYPE_MISMATCH), a partial family
+eliminator (accepted), mixed motive annotations (accepted).
+
+Deviations:
+- Method: the check.c diffs of 6fa6a15, 8dd82a3 and 676c7a8 went in by
+  `patch -p1 -F3`, the rejects by hand. The 6fa6a15 `check_family`
+  rewrite and the 676c7a8 `rule_elim` are hand-built: the orbit rule also
+  covered `Sum` and `Unit`, which agent-lang does not have, so
+  `elim_domain` has the family case only.
+- The builtin table row of `elim` has `OP_FAMILY` in its `result` field.
+  `RULE_ELIM` never reads that field: the result type of an `elim` comes
+  from the motive. The field is a placeholder, not a rule input.
+- A block sort under `elim` is refused by the generic `rule_elim` text
+  ("elim needs a motive on a domain family outside a block"), as in
+  orbit: only a family outside a block reaches `elim_on_family`.
+- The 20 JSON goldens did not change when `Vec` and the block entered
+  domain.lang, so no golden was regenerated.
+- The orbit L/R row ("the same parameter telescope") checks its two folds
+  and does not reduce them here: the block fold eval is chunk B.
+- In the regression texts the orbit `Unit` and `unit` are `Nat` and `0`,
+  and the orbit `Size`, `sz0` and `szS` are `Nat`, `0` and `succ`. The
+  orbit `state` rows and `Prop` rows are dropped (no state, Q4 (a)).
+
+### Chunk B: eval folds and elim
+
+Chunk B ports the eval of the indexed and block folds (donor commits
+8dd82a3 and 6fa6a15) and of the family eliminator (donor commit 676c7a8)
+into `src/front/eval.c`. It adds 1 check row and 11 path regression cases.
+`stuck_elim` is no longer a stub.
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 20 checked, 0 failed | none |
+| parse refusals | 11 | none |
+| check refusals | 67 | 66 -> 67 |
+| evals | 48 | none |
+| json builds | 20 | none |
+| build refusals | 3 | none |
+| regressions | 6 | none |
+| printer regressions | 2 | none |
+| path regressions | 93 checked, 0 failed | 82 -> 93 |
+
+Kickoff row (S2-kickoff.md, section 7, chunk B): eval.c has the 8dd82a3
+hunks (`block_ctors`, `fold_res`, `field_sort`, `stuck_fold`, the base of
+`fold_family`, `fold_path_field`, `fold_hcomp`, the targets first in
+`print_value`) and the 676c7a8 hunks (`reduce_elim`, `stuck_elim`,
+`elim_at`, `elim_path`, `elim_square`, `elim_family`, the `kan_apply`
+branches, `reduce_op`). The new check row is elim-path-case (PATH_END):
+a Vec elim whose vswap case does not meet the vcons image at i0.
+
+Functions in eval.c:
+- `fold_res`: the result type of a fold at FAMILY. It is CASES[NCASES],
+  or, for a block of n sorts, the target of FAMILY among the n targets
+  before the cases.
+- `field_sort`: the sort of a recursive field. It is the head of the
+  field type, or the head of the type under a path field.
+- `stuck_fold` stores `fold_res` at args[ncases]. `fold_family` starts
+  at the first constructor of the block, refuses a constructor of
+  another family as INTERNAL, and folds a recursive field at
+  `field_sort`. `fold_path_field` builds its CLOS_FOLD_PATH closure at
+  `field_sort`. `fold_hcomp` composes at `fold_res`.
+- `print_value` prints the targets of a block fold before the cases and
+  omits RES. The finCase branch stays.
+- `reduce_elim`, `stuck_elim`, `elim_at`, `elim_path`, `elim_square`,
+  `elim_family`: the family eliminator. The `kan_apply` arms for
+  CLOS_FOLD_PATH and CLOS_FOLD_FACE send a stuck elim to `elim_at`. The
+  `reduce_op` OP_ELIM arm calls `reduce_elim`.
+
+Path regression cases (test/path-regressions.c, cases 83 to 93):
+1. indexed fold: index arguments are not parameters (accepted, refl
+   check of the value).
+2. block fold: Even/Odd one (accepted, refl check of the Odd fold).
+3. block fold: Even/Odd two (accepted, a case uses the folded sibling
+   field).
+4. block fold: Box, a sibling recursive field at its target (accepted).
+5. block fold: L/R, the folds reduce (accepted, refl checks of firstL
+   and secondR).
+6. transport: the fibre of a transport result (accepted).
+7. block fold: the print order of the targets, Even -> Nat (round trip).
+8. block fold: the print order of the targets, Odd -> Nat (round trip).
+9. transport round trip: a constant line at Vec.
+10. transport round trip: an index line.
+11. transport round trip: Even/Odd.
+
+Deviations:
+- (a) No new round trip helper. `domain_roundtrip(label, domain, source)`
+  already exists in test/path-regressions.c, and the 5 round trips use it.
+- (b) `reduce_elim` refuses field 0 as INTERNAL. The orbit Sum and Unit
+  branches are not ported, because agent-lang has neither. Any other
+  field goes to `elim_family(field - 1)`.
+- (c) The transport round trips (cases 9 to 11) print stuck `transp`
+  terms. `transp_data` stays neutral for an indexed family and for a
+  block (chunk A ruling Q8 (a)).
+- (d) `print_value` keeps the agent-lang finCase branch (S5a). The donor
+  has no such branch.
+- The orbit test texts use `Nat` for `Size` and for `Unit`, `0` for
+  `sz0` and for `unit`, and `succ` for `szS`. Fresh names (Vx, Nx,
+  Even/Odd, Boxx/Itm, Lx/Rx) stand beside the domain names.

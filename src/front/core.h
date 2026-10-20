@@ -77,6 +77,7 @@ typedef enum {
   OP_GLUE_ELEM, /* glue: phi, sys, a; sys as in OP_HCOMP, each branch t */
   OP_UNGLUE,   /* unglue: A, phi, sys, g; stuck when no rule applies */
   OP_EMPTY,    /* Empty: the type with no value (K2) */
+  OP_ELIM,     /* elim: field = family + 1, then the motive, one case per constructor, the value */
   OP_ABSURD    /* absurd A e: e : Empty; always stuck, because Empty has no closed value */
 } Op;
 
@@ -256,6 +257,10 @@ typedef struct {
      constructor has 0 and NULL. */
   uint32_t interval_count;
   const Core *boundary;
+  /* The result indices (S6): one core for each index of the family, in the
+     context of the parameters and the point fields. NULL for a uniform
+     family. */
+  const Core *const *result;
 } CtorInfo;
 
 /* A domain family. Its constructors are ctors[first_ctor ...]. A family
@@ -267,6 +272,14 @@ typedef struct {
   uint32_t first_ctor;
   uint32_t ctor_count;
   uint64_t universe; /* the largest universe of a constructor field */
+  /* The index telescope (S6): index_count cores, index k in the context of
+     the parameters and the indices before it. 0 for a uniform family. */
+  const Core *const *index_types;
+  uint32_t index_count;
+  /* The block (S6): the families block_first up to block_first +
+     block_count. A family outside a block is a block of one. */
+  uint32_t block_first;
+  uint32_t block_count;
 } FamilyInfo;
 
 typedef struct {

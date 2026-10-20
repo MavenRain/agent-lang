@@ -1,8 +1,9 @@
 /* Grammar:
      decl    := 'def' 'rec'? NAME ':' term ':=' term
               | 'axiom' NAME ':' term
-              | 'family' NAME group* ':=' ctor ('|' ctor)*
-     ctor    := NAME group* ('[' cells ']')?
+              | 'family' NAME group* (':' telescope)? ':=' ctor ('|' ctor)*
+                ('and' NAME group* (':' telescope)? ':=' ctor ('|' ctor)*)*
+     ctor    := NAME group* ifield* (':' term)? ('[' cells ']')?
      group   := '(' NAME+ ':' term ')'
      term    := 'fun' (NAME | group)+ '=>' term
               | group ('->' | '*') term
@@ -134,6 +135,7 @@ static int starts_atom(TokKind kind) {
     case TOK_LPAREN:
     case TOK_KW_TYPE:
     case TOK_KW_SIGMA:
+    case TOK_KW_ELIM:
     case TOK_TILDE:
       return 1;
     case TOK_EOF:
@@ -155,6 +157,7 @@ static int starts_atom(TokKind kind) {
     case TOK_KW_FUN:
     case TOK_KW_FAMILY:
     case TOK_KW_AXIOM:
+    case TOK_KW_AND:
       return 0;
   }
   return 0;
@@ -366,6 +369,7 @@ static const Term *parse_atom(Parser *p) {
     case TOK_LPAREN: return parse_paren(p);
     case TOK_KW_TYPE: return parse_universe(p);
     case TOK_KW_SIGMA: return parse_sigma(p);
+    case TOK_KW_ELIM: return parse_leaf(p, TERM_VAR); /* elim MOTIVE case* x: the fold form (S2) */
     case TOK_TILDE: return parse_neg(p);
     case TOK_EOF:
     case TOK_RPAREN:
@@ -386,6 +390,7 @@ static const Term *parse_atom(Parser *p) {
     case TOK_KW_FUN:
     case TOK_KW_FAMILY:
     case TOK_KW_AXIOM:
+    case TOK_KW_AND:
       break;
   }
   fail_at(p, tok, "a term");
@@ -510,7 +515,9 @@ static int parse_family(Parser *p, Decl *d) {
   d->name = take_name(p, "a family name");
   if (d->name == NULL) return 0;
   p->def = d->name;
-  if (!parse_fields(p, &d->params, &d->param_count) || !expect(p, TOK_DEFINE, "':='")) return 0;
+  if (!parse_fields(p, &d->params, &d->param_count)) return 0;
+  d->index = eat(p, TOK_COLON) ? parse_term(p) : NULL;
+  if ((d->index == NULL && p->diag->set) || !expect(p, TOK_DEFINE, "':='")) return 0;
   Ctor *ctors = NULL;
   size_t count = 0;
   size_t cap = 0;
@@ -523,12 +530,29 @@ static int parse_family(Parser *p, Decl *d) {
     ctor->col = cur(p)->col;
     ctor->name = take_name(p, "a constructor name");
     if (ctor->name == NULL || !parse_fields(p, &ctor->fields, &ctor->field_count)) return 0;
+    ctor->result = eat(p, TOK_COLON) ? parse_term(p) : NULL;
+    if (ctor->result == NULL && p->diag->set) return 0;
     ctor->boundary = at(p, TOK_LBRACKET) ? parse_system(p) : NULL;
     if (ctor->boundary == NULL && p->diag->set) return 0;
   } while (eat(p, TOK_BAR));
   d->ctors = ctors;
   d->ctor_count = count;
   return 1;
+}
+
+/* `and NAME params [: index] := ctor | ...` (S6): the next sort of the
+   block that FIRST starts. Only a `family` declaration starts a block. */
+static int at_and(const Parser *p, const Decl *first) {
+  return at(p, TOK_KW_AND) && first->kind == DECL_FAMILY;
+}
+
+static int parse_and(Parser *p, Decl *d) {
+  const Token *tok = cur(p);
+  p->def = NULL;
+  d->origin = p->origin;
+  d->line = tok->line;
+  d->col = tok->col;
+  return parse_family(p, d);
 }
 
 static int parse_decl(Parser *p, Decl *d) {
@@ -541,6 +565,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_KW_DEF: return parse_def(p, d);
     case TOK_KW_AXIOM: return parse_axiom(p, d);
     case TOK_KW_FAMILY: return parse_family(p, d);
+    case TOK_KW_ELIM:
     case TOK_EOF:
     case TOK_IDENT:
     case TOK_NAT:
@@ -563,6 +588,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_KW_FUN:
     case TOK_KW_TYPE:
     case TOK_KW_SIGMA:
+    case TOK_KW_AND:
       break;
   }
   return fail_at(p, tok, "'def', 'axiom' or 'family'");
@@ -577,9 +603,19 @@ int parse_source(Arena *arena, const char *source, Origin origin, const TokenLis
   size_t count = list->count;
   size_t cap = list->cap;
   while (!at(&p, TOK_EOF)) {
+    size_t first = count;
     items = grow(&p, items, count, &cap, sizeof *items);
     if (items == NULL || !parse_decl(&p, &items[count])) return 0;
     count++;
+    while (at_and(&p, &items[first])) {
+      items = grow(&p, items, count, &cap, sizeof *items);
+      if (items == NULL || !parse_and(&p, &items[count])) return 0;
+      count++;
+    }
+    for (size_t k = first; k < count; k++) {
+      items[k].block_first = first;
+      items[k].block_count = count - first;
+    }
   }
   list->items = items;
   list->count = count;

@@ -41,6 +41,27 @@ Amendment (USER, 2026-10-18, after the S1 kickoff): also admit the `Fin`
 type former. This replaces O5 (a). The coin-lang `Fin n` builtin and its
 operations stay (sections 2 and 4). The other coin types go.
 
+### USER ruling (S2)
+
+The USER gave this ruling on 2026-10-19, after the S2 kickoff (the kickoff
+record, outside the repo, section 4):
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a
+
+Each letter is the proposal (a) of the kickoff.  Q1: the orbit-lang grammar
+verbatim (the index telescope after the parameters, the constructor result
+after the fields and the interval fields and before the boundary, `and` for
+a block, headers first, then point constructors, then path constructors).
+Q2: Nat-indexed examples, `Vec` and the `Charter`/`Ratified` block in the
+domain, no Size, no Bag, no squash constructor.  Q3: `elim` beside `fold`,
+a new keyword and the Op OP_ELIM, `fold` unchanged.  Q4: no Prop rows;
+section 3 is unchanged.  Q5: `Quot` stays the only quotient former.  Q6: the
+new codes HIT_INDEX and BLOCK_ORDER;  the rest TYPE_MISMATCH, HIT_BOUNDARY
+and PATH_END.  Q7: block sorts stay outside `elim` (TYPE_MISMATCH).  Q8:
+transp at an indexed or block sort stays neutral for every line.  Q9:
+families stay in domain/domain.lang (rule R1).  The slice order of section 8
+does not change.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |

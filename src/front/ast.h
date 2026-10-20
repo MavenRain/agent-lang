@@ -47,6 +47,9 @@ typedef struct {
   const char *name;
   const Field *fields;
   size_t field_count;
+  /* The result `: F params indices` after the fields of a constructor of an
+     indexed family (S6), or NULL. */
+  const Term *result;
   /* The boundary `[ k1 -> t1, ... ]` of a path constructor (a TERM_SYSTEM
      list), or NULL. */
   const Term *boundary;
@@ -57,7 +60,7 @@ typedef struct {
 typedef enum {
   DECL_DEF,    /* def [rec] name : type := body */
   DECL_AXIOM,  /* axiom name : type */
-  DECL_FAMILY  /* family name params := ctor | ... */
+  DECL_FAMILY  /* family name params [: index] := ctor | ... [and ...] */
 } DeclKind;
 
 /* A family is legal only in the domain file (rule R1). */
@@ -79,6 +82,14 @@ typedef struct {
   size_t param_count;
   const Ctor *ctors;
   size_t ctor_count;
+  /* The index telescope `: T1 -> ... -> Type 0` of a family (S6), or NULL
+     for a uniform family. */
+  const Term *index;
+  /* The block of the declaration (S6): the list position of its first sort
+     and the number of sorts. A declaration outside a block is a block of
+     one. */
+  size_t block_first;
+  size_t block_count;
 } Decl;
 
 /* Domain declarations come first, then the program. */

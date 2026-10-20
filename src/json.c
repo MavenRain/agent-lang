@@ -169,7 +169,7 @@ static int family_json(Out *o, const Value *type, const Value *v) {
     return internal(o, "a family value that is not a constructor");
   f = &o->m->families[type->inst];
   ci = &o->m->ctors[v->inst];
-  if (ci->family != type->inst || v->argc != f->param_count + ci->field_count || type->argc != f->param_count)
+  if (ci->family != type->inst || v->argc != f->param_count + ci->field_count || type->argc != f->param_count + f->index_count)
     return internal(o, "a constructor of another family");
   if (is_enum(o->m, f))
     return put_string(o, ci->name);
@@ -185,7 +185,7 @@ static int family_json(Out *o, const Value *type, const Value *v) {
     ok = ok && put_text(o, "\"tag\":") && put_string(o, ci->name);
   for (i = 0; ok && i < ci->field_count; i++) {
     const FieldInfo *fi = &ci->fields[i];
-    const Value *ft = fi->recursive ? type : eval_core(o->m, env, fi->type);
+    const Value *ft = eval_core(o->m, env, fi->type);
     int lead = i == 0 && f->ctor_count == 1;
     ok = ft != NULL && (lead || put_text(o, ",")) && put_string(o, fi->name) && put_text(o, ":")
       && value_json(o, ft, v->args[f->param_count + i]);
@@ -254,6 +254,7 @@ static int op_json(Out *o, const Value *type, const Value *v) {
   case OP_FOLD_NAT:
   case OP_FOLD_LIST:
   case OP_FOLD_FAMILY:
+  case OP_ELIM:
   case OP_UNFOLD:
   case OP_FILTER:
   case OP_WITNESS:
@@ -529,7 +530,8 @@ static int hit_tree(Out *o, const Value *ty, const Value *x, int *done) {
       return 0;
     if (fi->recursive) {
       int field_done;
-      if (!hit_tree(o, ty, field, &field_done))
+      ft = eval_core(m, env, fi->type);
+      if (ft == NULL || !hit_tree(o, ft, field, &field_done))
         return 0;
       if (!field_done)
         return 1;

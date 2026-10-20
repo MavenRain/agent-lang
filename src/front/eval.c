@@ -29,7 +29,7 @@ static const char *const OP_NAMES[] = {
   [OP_FIN_VAL] = "finVal", [OP_FIN_EQ] = "finEq", [OP_FIN_CASE] = "finCase",
   [OP_DEC_EQ_FIN] = "decEqFin", [OP_DEC_EQ_NAT] = "decEqNat",
   [OP_GLUE] = "Glue", [OP_GLUE_ELEM] = "glue", [OP_UNGLUE] = "unglue",
-  [OP_EMPTY] = "Empty", [OP_ABSURD] = "absurd"
+  [OP_EMPTY] = "Empty", [OP_ELIM] = "elim", [OP_ABSURD] = "absurd"
 };
 
 /* The number of arguments of each operation. VARIES: it comes from the
@@ -51,7 +51,7 @@ static const unsigned char OP_ARITY[] = {
   [OP_FIN_NEG] = 2, [OP_FIN_MUL] = 3, [OP_FIN_VAL] = 2, [OP_FIN_EQ] = 3,
   [OP_FIN_CASE] = VARIES, [OP_DEC_EQ_FIN] = 3, [OP_DEC_EQ_NAT] = 2,
   [OP_GLUE] = 3, [OP_GLUE_ELEM] = 3,
-  [OP_UNGLUE] = 4, [OP_EMPTY] = 0, [OP_ABSURD] = 2
+  [OP_UNGLUE] = 4, [OP_EMPTY] = 0, [OP_ELIM] = VARIES, [OP_ABSURD] = 2
 };
 
 typedef enum {
@@ -850,22 +850,52 @@ static const Value *reduce_fold_list(Machine *m, const Value *const *a) {
   return acc;
 }
 
-/* CASES holds NCASES cases, then the result type RES at CASES[NCASES]. */
+/* The number of constructors of the block of F (S6), or of F. */
+static uint32_t block_ctors(const Machine *m, const FamilyInfo *f) {
+  const FamilyInfo *last = &m->families[f->block_first + f->block_count - 1u];
+  return f->block_count > 1u ? last->first_ctor + last->ctor_count - m->families[f->block_first].first_ctor : f->ctor_count;
+}
+
+/* The result type of a fold at FAMILY: CASES[NCASES], or for a block of n
+   sorts (S6) the target of FAMILY in the n targets before it. */
+static const Value *fold_res(const Machine *m, uint32_t family, const Value *const *cases, uint32_t ncases) {
+  const FamilyInfo *f = &m->families[family];
+  return f->block_count > 1u ? cases[ncases - f->block_count + (family - f->block_first)] : cases[ncases];
+}
+
+/* The sort of the recursive field FIELD of a constructor of FAMILY: the
+   head of its type, a sort of the block (S6). */
+static uint32_t field_sort(const FieldInfo *field, uint32_t family) {
+  const Core *t = field->path ? field->type->b : field->type;
+  return t != NULL && t->kind == CORE_OP && t->op == OP_FAMILY ? t->inst : family;
+}
+
+/* CASES holds NCASES cases, then the result type RES at CASES[NCASES]. A
+   block fold (S6) has the targets of its sorts at the end of the cases,
+   and RES is the target of FAMILY. */
 static const Value *stuck_fold(Machine *m, uint32_t family, const Value *const *cases, uint32_t ncases, const Value *x) {
   const Value **args = arena_alloc(m->arena, ((size_t)ncases + 2u) * sizeof *args);
   uint32_t i;
   if (args == NULL)
     return oom(m);
-  for (i = 0; i <= ncases; i++)
+  for (i = 0; i < ncases; i++)
     args[i] = cases[i];
+  args[ncases] = fold_res(m, family, cases, ncases);
   args[ncases + 1u] = x;
   return val_op(m, VAL_STUCK, OP_FOLD_FAMILY, family, 0, args, ncases + 2u);
+}
+
+/* A neutral elim over the domain family FAMILY (S7 B1, O22). A holds the
+   motive, the N - 2 cases and the scrutinee at A[N - 1]. */
+static const Value *stuck_elim(Machine *m, uint32_t family, const Value *const *a, uint32_t n) {
+  return val_op(m, VAL_STUCK, OP_ELIM, n - 2u, family + 1u, a, n);
 }
 
 static const Value *fold_path(Machine *m, uint32_t family, const Value *const *cases, uint32_t ncases, const Value *x, const Value *p);
 static const Value *fold_hcomp(Machine *m, uint32_t family, const Value *const *cases, uint32_t ncases, const Value *x);
 static const Value *fold_path_field(Machine *m, uint32_t family, const Value *const *cases, uint32_t ncases, const Value *x, uint32_t field);
 static const Value *fold_square(Machine *m, uint32_t family, const Value *const *cases, uint32_t ncases, const Value *x, const Value *s);
+static const Value *elim_family(Machine *m, uint32_t family, const Value *const *a, uint32_t n);
 static const Value *kan_closure4(Machine *m, ValKind kind, ClosTag tag, uint32_t field, uint32_t argc, const Value *x, const Value *y, const Value *z, const Value *w);
 
 /* fold case... x over a domain family: the case of the constructor of X,
@@ -878,6 +908,7 @@ static const Value *fold_family(Machine *m, uint32_t family, const Value *const 
   const CtorInfo *ctor;
   const Value *acc;
   const Value *field;
+  uint32_t base;
   uint32_t i;
   if (x == NULL)
     return NULL;
@@ -895,16 +926,18 @@ static const Value *fold_family(Machine *m, uint32_t family, const Value *const 
     return internal(m, "a fold of a value that is not in the family");
   fam = &m->families[family];
   ctor = &m->ctors[x->inst];
-  if (x->inst < fam->first_ctor || x->inst - fam->first_ctor >= ncases || x->argc != fam->param_count + ctor->field_count + ctor->interval_count)
+  /* The constructor slots of a block are contiguous (S6). */
+  base = m->families[fam->block_first].first_ctor;
+  if (ctor->family != family || x->inst < base || x->inst - base >= ncases || x->argc != fam->param_count + ctor->field_count + ctor->interval_count)
     return internal(m, "a fold of a constructor of another family");
   if (ctor->interval_count > 2u)
     return internal(m, "a fold of a constructor with more than 2 interval fields");
   if (!enter(m))
     return NULL;
-  acc = cases[x->inst - fam->first_ctor];
+  acc = cases[x->inst - base];
   for (i = 0; i < ctor->field_count && acc != NULL; i++) {
     field = x->args[fam->param_count + i];
-    acc = apply_value(m, acc, ctor->fields[i].recursive ? fold_family(m, family, cases, ncases, field) : ctor->fields[i].path ? fold_path_field(m, family, cases, ncases, x, i) : field);
+    acc = apply_value(m, acc, ctor->fields[i].recursive ? fold_family(m, field_sort(&ctor->fields[i], family), cases, ncases, field) : ctor->fields[i].path ? fold_path_field(m, family, cases, ncases, x, i) : field);
   }
   if (ctor->interval_count == 1u && acc != NULL)
     acc = fold_path(m, family, cases, ncases, x, acc);
@@ -966,6 +999,115 @@ static const Value *fold_square(Machine *m, uint32_t family, const Value *const 
       return NULL;
   }
   return path_apply(m, path_apply(m, s, r1, outer[0], outer[1]), x->args[x->argc - 1u], inner[0], inner[1]);
+}
+
+/* The elim A[0 .. N - 1] at X in place of the scrutinee A[N - 1] (S7 B1). */
+static const Value *elim_at(Machine *m, uint32_t family, const Value *const *a, uint32_t n, const Value *x) {
+  const Value **b = arena_alloc(m->arena, (size_t)n * sizeof *b);
+  uint32_t i;
+  if (b == NULL)
+    return oom(m);
+  for (i = 0; i + 1u < n; i++)
+    b[i] = a[i];
+  b[n - 1u] = x;
+  return elim_family(m, family, b, n);
+}
+
+/* (case fields) @ r for the path constructor value x = A[N - 1] at r. P is
+   the case at the fields. The ends are the elims of x at i0 and i1, for a
+   neutral P (as fold_path). */
+static const Value *elim_path(Machine *m, uint32_t family, const Value *const *a, uint32_t n, const Value *p) {
+  const Value *x = a[n - 1u];
+  const Value *ends[2];
+  const Value **b;
+  uint32_t i;
+  int side;
+  for (side = 0; side < 2; side++) {
+    b = arena_alloc(m->arena, (size_t)x->argc * sizeof *b);
+    if (b == NULL)
+      return oom(m);
+    for (i = 0; i + 1u < x->argc; i++)
+      b[i] = x->args[i];
+    b[x->argc - 1u] = val_iend(m, side);
+    ends[side] = elim_at(m, family, a, n, val_ctor(m, x->inst, b, x->argc));
+  }
+  return path_apply(m, p, x->args[x->argc - 1u], ends[0], ends[1]);
+}
+
+/* (case fields) @ r1 @ r2 for the constructor value x = A[N - 1] with 2
+   interval fields. S is the case at the fields, a square. The faces are
+   as in fold_square, over a stuck elim of x (CLOS_FOLD_FACE). */
+static const Value *elim_square(Machine *m, uint32_t family, const Value *const *a, uint32_t n, const Value *s) {
+  const Value *x = a[n - 1u];
+  const Value *stuck = stuck_elim(m, family, a, n);
+  const Value *r1 = x->args[x->argc - 2u];
+  const Value *outer[2];
+  const Value *inner[2];
+  int side;
+  for (side = 0; side < 2; side++) {
+    outer[side] = kan_closure4(m, VAL_PLAM, CLOS_FOLD_FACE, family, 3u, x, val_iend(m, side), stuck, NULL);
+    inner[side] = elim_at(m, family, a, n, ctor_at2(m, x, r1, val_iend(m, side)));
+    if (outer[side] == NULL || inner[side] == NULL)
+      return NULL;
+  }
+  return path_apply(m, path_apply(m, s, r1, outer[0], outer[1]), x->args[x->argc - 1u], inner[0], inner[1]);
+}
+
+/* elim P c1 .. cn x over the domain family FAMILY (S7 B1, O21). The case
+   of the constructor of x takes each field, then for a recursive field its
+   elim, and for a path field the elim along it (CLOS_FOLD_PATH). A path
+   constructor and a squash go to elim_path and elim_square. A neutral x
+   and a formal hcomp stay neutral (O22). */
+static const Value *elim_family(Machine *m, uint32_t family, const Value *const *a, uint32_t n) {
+  const Value *x = a[n - 1u];
+  const FamilyInfo *fam;
+  const CtorInfo *ctor;
+  const FieldInfo *f;
+  const Value *acc;
+  const Value *out;
+  uint32_t p;
+  uint32_t i;
+  if (x == NULL)
+    return NULL;
+  if (blocked(m, x, OP_ELIM, n - 2u, family + 1u, a, n, &out))
+    return out;
+  if (val_is(x, OP_HCOMP))
+    return stuck_elim(m, family, a, n);
+  if (family >= m->family_count || !val_is(x, OP_CTOR) || x->inst >= m->ctor_count)
+    return internal(m, "an elim of a value that is not in the family");
+  fam = &m->families[family];
+  ctor = &m->ctors[x->inst];
+  p = fam->param_count;
+  if (ctor->family != family || x->inst < fam->first_ctor || x->inst - fam->first_ctor >= n - 2u || x->argc != p + ctor->field_count + ctor->interval_count)
+    return internal(m, "an elim of a constructor of another family");
+  if (ctor->interval_count > 2u)
+    return internal(m, "an elim of a constructor with more than 2 interval fields");
+  if (!enter(m))
+    return NULL;
+  acc = a[1u + (x->inst - fam->first_ctor)];
+  for (i = 0; i < ctor->field_count && acc != NULL; i++) {
+    f = &ctor->fields[i];
+    acc = apply_value(m, acc, x->args[p + i]);
+    if (f->recursive && acc != NULL)
+      acc = apply_value(m, acc, elim_at(m, family, a, n, x->args[p + i]));
+    if (f->path && acc != NULL)
+      acc = apply_value(m, acc, kan_closure4(m, VAL_PLAM, CLOS_FOLD_PATH, family, 4u, x->args[p + i], x->args[p + f->ends[0]], x->args[p + f->ends[1]], stuck_elim(m, family, a, n)));
+  }
+  if (ctor->interval_count == 1u && acc != NULL)
+    acc = elim_path(m, family, a, n, acc);
+  if (ctor->interval_count == 2u && acc != NULL)
+    acc = elim_square(m, family, a, n, acc);
+  m->depth--;
+  return acc;
+}
+
+/* elim P c1 .. cn x with n = INST + 2 (USER ruling S4) over the domain
+   family FIELD - 1 (S7 B1). agent-lang has no Sum or Unit elim, so FIELD
+   is never 0: an elim without a family is INTERNAL. */
+static const Value *reduce_elim(Machine *m, uint32_t inst, uint32_t field, const Value *const *a, uint32_t n) {
+  if (field == 0u || n != inst + 2u)
+    return internal(m, "an elim without a domain family");
+  return elim_family(m, field - 1u, a, n);
 }
 
 /* 1 when the step result R ends the list. *TAIL is then the end. */
@@ -1412,9 +1554,11 @@ static uint32_t varied_arity(const Machine *m, Op op, uint32_t inst) {
   if (op == OP_CTOR && c != NULL && c->family < m->family_count)
     return m->families[c->family].param_count + c->field_count + c->interval_count;
   if (op == OP_FAMILY && f != NULL)
-    return f->param_count;
+    return f->param_count + f->index_count;
   if (op == OP_FOLD_FAMILY && f != NULL)
-    return f->ctor_count + 2u;
+    return block_ctors(m, f) + (f->block_count > 1u ? f->block_count : 0u) + 2u;
+  if (op == OP_ELIM)
+    return inst + 2u;
   return UINT32_MAX;
 }
 
@@ -1689,10 +1833,15 @@ static const Value *kan_apply(Machine *m, const Value *k, const Value *r) {
   case CLOS_FOLD_PATH:
     if (a[3]->argc < 2u)
       return internal(m, "a folded path field without its cases");
+    /* A stuck elim (S7 B1) holds the motive, the cases and x. */
+    if (a[3]->op == OP_ELIM)
+      return elim_at(m, k->field, a[3]->args, a[3]->argc, path_apply(m, a[0], r, a[1], a[2]));
     return fold_family(m, k->field, a[3]->args, a[3]->argc - 2u, path_apply(m, a[0], r, a[1], a[2]));
   case CLOS_FOLD_FACE:
     if (a[2]->argc < 2u)
       return internal(m, "a folded face without its cases");
+    if (a[2]->op == OP_ELIM)
+      return elim_at(m, k->field, a[2]->args, a[2]->argc, ctor_at2(m, a[0], a[1], r));
     return fold_family(m, k->field, a[2]->args, a[2]->argc - 2u, ctor_at2(m, a[0], a[1], r));
   case CLOS_PATH_SIGMA_COD:
     return closure_apply(m, line_former(m, line_at(m, a[0], r), VAL_SIGMA), sigma_part(m, line_at(m, a[1], r), 0));
@@ -1848,6 +1997,10 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
       break;
     return transp_list(m, line, phi, base);
   case OP_FAMILY:
+    /* Indexed fibres and sibling sorts need their own field lines. Keep
+       the transport neutral until those reductions are implemented. */
+    if (head->inst < m->family_count && (m->families[head->inst].index_count > 0u || m->families[head->inst].block_count > 1u))
+      break;
     /* S4 item 6 (R7 (a)): a family with no parameters is the same type at
        each point of the line by its form (not by regularity), so the base
        stays, also a neutral base or a formal hcomp. */
@@ -1881,6 +2034,7 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
   case OP_FOLD_NAT:
   case OP_FOLD_LIST:
   case OP_FOLD_FAMILY:
+  case OP_ELIM:
   case OP_UNFOLD:
   case OP_FILTER:
   case OP_WITNESS:
@@ -2095,7 +2249,7 @@ static const Value *hcomp_formal(Machine *m, const Value *ty, const Value *phi, 
 static const Value *fold_path_field(Machine *m, uint32_t family, const Value *const *cases, uint32_t ncases, const Value *x, uint32_t field) {
   const FieldInfo *f = &m->ctors[x->inst].fields[field];
   uint32_t p = m->families[family].param_count;
-  return kan_closure4(m, VAL_PLAM, CLOS_FOLD_PATH, family, 4u, x->args[p + field], x->args[p + f->ends[0]], x->args[p + f->ends[1]], stuck_fold(m, family, cases, ncases, x));
+  return kan_closure4(m, VAL_PLAM, CLOS_FOLD_PATH, field_sort(f, family), 4u, x->args[p + field], x->args[p + f->ends[0]], x->args[p + f->ends[1]], stuck_fold(m, family, cases, ncases, x));
 }
 
 /* fold (hcomp F phi u u0) = hcomp RES phi (fun i => [ k -> fold (u i) ])
@@ -2105,7 +2259,7 @@ static const Value *fold_hcomp(Machine *m, uint32_t family, const Value *const *
   const Value *pack = stuck_fold(m, family, cases, ncases, x);
   const Value *sys = pack == NULL ? NULL : sys_map(m, x->args[2], CLOS_SYS_FOLD, family, 1, pack, NULL, NULL);
   const Value *base = sys == NULL ? NULL : fold_family(m, family, cases, ncases, x->args[3]);
-  return base == NULL ? NULL : hcomp(m, cases[ncases], x->args[1], sys, base);
+  return base == NULL ? NULL : hcomp(m, fold_res(m, family, cases, ncases), x->args[1], sys, base);
 }
 
 /* The index of the branch of SYS under the first true (i1) key, or
@@ -2836,6 +2990,8 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
     return reduce_either(m, a, n);
   case OP_OPTION_ELIM:
     return reduce_option(m, a, n);
+  case OP_ELIM:
+    return reduce_elim(m, inst, field, a, n);
   case OP_PURE:
     return reduce_pure(m, inst, a[0]);
   case OP_MAP:
@@ -3401,7 +3557,7 @@ static int name_used(const Printer *p, const char *name) {
       return 1;
   for (i = 0; i < p->m->ctor_count; i++) {
     const CtorInfo *c = &p->m->ctors[i];
-    if (strcmp(name, c->name) == 0)
+    if (c->name != NULL && strcmp(name, c->name) == 0)
       return 1;
     for (j = 0; j < c->field_count; j++)
       if (strcmp(name, c->fields[j].name) == 0)
@@ -3667,6 +3823,7 @@ static void print_value(Printer *p, const Value *v, int atom) {
   }
   p->depth++;
   while (is_chain(v) && !p->full && !(atom && is_typed_case(v))) {
+    uint32_t count = v->argc - 1u;
     if (atom) {
       put(p, "(");
       open++;
@@ -3678,11 +3835,19 @@ static void print_value(Printer *p, const Value *v, int atom) {
       snprintf(num, sizeof num, " %lu", (unsigned long)(v->argc - 1u));
       put(p, num);
     }
-    /* A fold over a family does not print its result type RES (the
-       argument before the scrutinee): the source form has no RES. */
-    for (i = 0; i + 1u < v->argc; i++) {
-      if (v->op == OP_FOLD_FAMILY && i + 2u == v->argc)
-        continue;
+    /* A family fold omits RES. A block fold prints its targets first. */
+    if (v->op == OP_FOLD_FAMILY) {
+      const FamilyInfo *f = &p->m->families[v->inst];
+      count--;
+      if (f->block_count > 1u) {
+        count -= f->block_count;
+        for (i = 0; i < f->block_count; i++) {
+          put(p, " ");
+          print_value(p, v->args[count + i], 1);
+        }
+      }
+    }
+    for (i = 0; i < count; i++) {
       put(p, " ");
       print_value(p, v->args[i], 1);
     }

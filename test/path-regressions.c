@@ -494,6 +494,163 @@ int main(void) {
     "def f : C -> Nat := fun (x : C) => finVal 3 (witness x)\n"
     "def p : Path (C -> Nat) f f := refl\n",
     "\"value\":{\"paths\":[{\"refl\":0},{\"refl\":2},{\"refl\":2}]}");
+  /* S2 chunk A (orbit-lang S6 B1 to B4 and S7 B1 rows): indexed families,
+     mutual blocks and the elim check. The texts come from orbit
+     test/fronttool.c with Size as Nat, sz0 as 0, szS as succ, Unit as Nat
+     and fresh names beside the domain names. The fold values of the L/R
+     row are checked and not reduced here: the block fold eval is chunk B. */
+  failed += !domain_refuses("indexed family: an end at another index",
+    "family Vx : Nat -> Type 0 := vnilx : Vx 0 | vconsx (vxSize : Nat) (vxTail : Vx vxSize) : Vx (succ vxSize) "
+    "| vbadx (badxSize : Nat) (badxTail : Vx badxSize) (i : I) : Vx (succ badxSize) "
+    "[ ~i -> vconsx badxSize badxTail, i -> badxTail ]\n",
+    "def u : Nat := 0\n", "HIT_INDEX");
+  failed += !domain_refuses("indexed family: a constructor without a result",
+    "family Vx : Nat -> Type 0 := vnilx | vconsx (vxSize : Nat) (vxTail : Vx vxSize) : Vx (succ vxSize)\n",
+    "def u : Nat := 0\n", "HIT_INDEX");
+  failed += !domain_refuses("indexed family: a result head that is not the family",
+    "family Vx : Nat -> Type 0 := vnilx : Nat | vconsx (vxSize : Nat) (vxTail : Vx vxSize) : Vx (succ vxSize)\n",
+    "def u : Nat := 0\n", "HIT_INDEX");
+  failed += !domain_refuses("block: a header names a later sort",
+    "family P0 : Q0 -> Type 0 := p0 : P0 q0 and Q0 := q0\n",
+    "def u : Nat := 0\n", "BLOCK_ORDER");
+  failed += !domain_accepts("block: a field names a later sort",
+    "family Ch := gen | adoptx (adoptxOf : Ch) (adoptxBy : Rt adoptxOf) and Rt : Ch -> Type 0 := rat (ratOf : Ch) : Rt ratOf\n",
+    "def u : Nat := 0\n");
+  failed += !domain_refuses("block fold: an extra argument before the value",
+    "family Even := ez | es (oddPrev : Odd) and Odd := os (evenPrev : Even)\n",
+    "def bad : Nat := fold (Even -> Nat) Nat (fun (e : Even) => 0) (fun (u : Nat) => fun (e : Even) => 1) "
+    "(fun (g : Even -> Nat) => 0) 0 ez\n", "TYPE_MISMATCH");
+  failed += !domain_refuses("reserved header: a fold of the sort under check",
+    "family Ax := ax (axN : Nat) and Bx (x : Ax) (y : fold Nat x) := bx\n",
+    "def value : Bx (ax 0) 0 := bx (ax 0) 0\n", "HIT_BOUNDARY");
+  failed += !domain_refuses("block universe: at Type 0",
+    "family Low := low (high : High) and High := highCtor (big : Type 0)\n",
+    "def small : Type 0 := Low\n", "TYPE_MISMATCH");
+  failed += !domain_accepts("block universe: at Type 1",
+    "family Low := low (high : High) and High := highCtor (big : Type 0)\n",
+    "def large : Type 1 := Low\n");
+  failed += !domain_accepts("higher-order index telescope: 1",
+    "family Fx (A : Type 0) : ((Gx : Type 0) -> Gx -> Gx) -> Type 0 := mkx (mkxArg : (T : Type 0) -> T -> T) : Fx A mkxArg and Gx := gx\n",
+    "def u : Nat := 0\n");
+  failed += !domain_accepts("higher-order index telescope: 2",
+    "family Fx (Gx : Type 0) : Gx -> Type 0 := mkx (mkxArg : Gx) : Fx Gx mkxArg and Gx := gx\n",
+    "def u : Nat := 0\n");
+  failed += !domain_accepts("block fold: the same parameter telescope",
+    "family Lx (A : Type 0) (a : A) := leftLx (lxValue : A) and Rx (A : Type 0) (a : A) := rightRx (rxLeft : Lx A a)\n",
+    "def firstL : Nat := fold Nat Nat (fun (n : Nat) => n) (fun (n : Nat) => 0) (leftLx Nat 7 8)\n"
+    "def secondR : Nat := fold Nat Nat (fun (n : Nat) => n) (fun (n : Nat) => 0) (rightRx Nat 7 (leftLx Nat 7 8))\n");
+  failed += !domain_refuses("block fold: a different parameter telescope",
+    "family Fx (A : Type 0) := makeFx (fxValue : A) and Gx (n : Nat) := makeGx\n",
+    "def result : Nat := fold Nat Nat (fun (x : Nat) => 0) 0 (makeGx 7)\n", "TYPE_MISMATCH");
+  failed += !domain_accepts("elim: a partial family eliminator",
+    "family Nx := zerox | succx (predx : Nx)\n",
+    "def elimId : Nx -> Nx := elim (fun (n : Nx) => Nx) zerox (fun n ih => succx ih)\n");
+  failed += !domain_accepts("elim: mixed motive annotations",
+    "family Nx := zerox | succx (predx : Nx)\n"
+    "family Vx : Nx -> Type 0 := nilVx : Vx zerox | consVx (lenx : Nx) (tailVx : Vx lenx) : Vx (succx lenx)\n",
+    "def elimMixed : (n : Nx) -> Vx n -> Nx := fun n v => elim (fun k => fun (t : Vx k) => Nx) zerox (fun k t ih => succx ih) v\n");
+  /* S2 chunk B (orbit-lang S6 B3, S6 B4 and S7 B1 rows): the indexed and
+     block fold eval, the fold print order and the transport round trips.
+     The texts come from orbit test/fronttool.c with Size as Nat, sz0 as 0,
+     szS as succ, Unit as Nat, unit as 0 and fresh names beside the domain
+     names. */
+  failed += !domain_accepts("indexed fold: index arguments are not parameters",
+    "family Vx (A : Type 0) : Nat -> Type 0 := vnx : Vx A 0 | vcx (item : A) : Vx A (succ 0) "
+    "| segx (i : I) : Vx A 0 [ ~i -> vnx A, i -> vnx A ]\n",
+    "def result : Path Nat (fold 0 (fun a => a) refl (vcx Nat 7)) 7 := refl\n");
+  failed += !domain_accepts("block fold: Even/Odd one",
+    "family Even := ez | es (oddPrev : Odd) and Odd := os (evenPrev : Even)\n",
+    "def one : Path Nat (fold Nat Nat 0 (fun (u : Nat) => 1) (fun (n : Nat) => 0) (es (os ez))) 1 := refl\n");
+  failed += !domain_accepts("block fold: Even/Odd two",
+    "family Even := ez | es (oddPrev : Odd) and Odd := os (evenPrev : Even)\n",
+    "def two : Path Nat (fold Nat Nat 0 (fun (u : Nat) => natAdd u 1) (fun (n : Nat) => natAdd n 1) (es (os ez))) 2 := refl\n");
+  failed += !domain_accepts("block fold: Box, a sibling recursive field at its target",
+    "family Boxx := boxx (boxxLeft : Itm) (boxxRight : Itm) (boxxPath : Path Itm boxxLeft boxxRight) and Itm := itm\n",
+    "def result : Path Nat 0 0 := fun (i : I) => fold Nat Nat (fun x y p => p @ i) 0 (boxx itm itm refl)\n");
+  failed += !domain_accepts("block fold: L/R, the folds reduce",
+    "family Lx (A : Type 0) (a : A) := leftLx (lxValue : A) and Rx (A : Type 0) (a : A) := rightRx (rxLeft : Lx A a)\n",
+    "def firstL : Path Nat (fold Nat Nat (fun (n : Nat) => n) (fun (n : Nat) => 0) (leftLx Nat 7 8)) 8 := refl\n"
+    "def secondR : Path Nat (fold Nat Nat (fun (n : Nat) => n) (fun (n : Nat) => 0) (rightRx Nat 7 (leftLx Nat 7 8))) 0 := refl\n");
+  failed += !domain_accepts("transport: the fibre of a transport result",
+    "family Vx (A : Type 0) : Nat -> Type 0 := vnx : Vx A 0 "
+    "| vcx (vcxLen : Nat) (vcxHead : A) (vcxTail : Vx A vcxLen) : Vx A (succ vcxLen)\n",
+    "def fibre : Vx Nat (succ 0) := transp (fun (i : I) => Vx Nat (succ 0)) i0 (vcx Nat 0 7 (vnx Nat))\n");
+  failed += !domain_roundtrip("block fold: the print order of the targets, Even -> Nat",
+    "family Even := ez | es (oddPrev : Odd) and Odd := os (evenPrev : Even)\n",
+    "def printEven : Even -> Nat := fun x => fold Nat Nat 0 (fun u => 1) (fun n => 0) x\n");
+  failed += !domain_roundtrip("block fold: the print order of the targets, Odd -> Nat",
+    "family Even := ez | es (oddPrev : Odd) and Odd := os (evenPrev : Even)\n",
+    "def printOdd : Odd -> Nat := fun x => fold Nat Nat 0 (fun u => 1) (fun n => 0) x\n");
+  failed += !domain_roundtrip("transport round trip: a constant line at Vec",
+    "family Vx (A : Type 0) : Nat -> Type 0 := vnx : Vx A 0\n",
+    "def line : Vx Nat 0 := transp (fun (i : I) => Vx Nat 0) i0 (vnx Nat)\n");
+  failed += !domain_roundtrip("transport round trip: an index line",
+    "family Nx := zx | sx (px : Nx) | edgex (i : I) [ ~i -> zx, i -> sx zx ]\n"
+    "family Vx : Nx -> Type 0 := vnx : Vx zx | vcx : Vx (sx zx)\n",
+    "def line : Vx (sx zx) := transp (fun (i : I) => Vx (edgex i)) i0 vnx\n");
+  failed += !domain_roundtrip("transport round trip: Even/Odd",
+    "family Even (A : Type 0) := ez | es (oddPrev : Odd A) and Odd (A : Type 0) := os (evenPrev : Even A)\n",
+    "def line : Even Nat := transp (fun (i : I) => Even Nat) i0 (es Nat (os Nat (ez Nat)))\n");
+  failed += !domain_json_contains("indexed constructors retain only parameters in their field environment", "",
+    "def vector : Vec Nat 1 := vcons Nat 0 7 (vnil Nat)\n",
+    "\"value\":{\"tag\":\"vcons\",\"consLen\":0,\"consHead\":7,\"consTail\":{\"tag\":\"vnil\"}}");
+  failed += !domain_json_contains("indexed enum constructor JSON",
+    "family Ix : Nat -> Type 0 := ix : Ix 0\n",
+    "def result : Ix 0 := ix\n", "\"value\":\"ix\"");
+  failed += !domain_json_contains("indexed sibling constructor JSON", "",
+    "def result : Ratified Nat (genesis Nat) := ratify Nat (genesis Nat) 7\n",
+    "\"value\":{\"ratifyBase\":{\"tag\":\"genesis\"},\"ratifyRule\":7}");
+  failed += !domain_json_contains("HIT JSON traverses recursive fields at their sibling sort",
+    "family Boxx := boxx (boxxItem : Itm) "
+    "| boxxLoop (boxxAt : Itm) (i : I) [ ~i -> boxx boxxAt, i -> boxx boxxAt ] and Itm := itm\n",
+    "def result : Path Boxx (boxx itm) (boxx itm) := fun (i : I) => boxxLoop itm i\n",
+    "\"value\":{\"path\":\"boxxLoop\",\"args\":[\"itm\"]}");
+  failed += !domain_refuses("elim cannot use unfinished constructor slots in a field type",
+    "family Xx := zxx | packxx (pxx : Xx) (qxx : Path Nat (elim (fun (v : Xx) => Nat) 0 0 0 pxx) 0) "
+    "| edgexx (i : I) [ ~i -> zxx, i -> zxx ]\n",
+    "def p : Path Xx (packxx zxx refl) (packxx zxx refl) := fun (i : I) => packxx (edgexx i) refl\n",
+    "HIT_BOUNDARY");
+  failed += !domain_refuses("elim cannot use unfinished constructor slots in a boundary",
+    "family Xx := zxx | edgexx (i : I) [ ~i -> zxx, i -> elim (fun (v : Xx) => Xx) zxx zxx zxx ]\n",
+    "def result : Nat := 0\n", "HIT_BOUNDARY");
+  failed += !domain_refuses("diagnostic printing skips unnamed constructor slots",
+    "family Ax := ax (axType : Type 0) "
+    "and Bx : (elim (fun (x : Ax) => Type 0) Nat (ax Nat)) -> Type 0 := bx (bxVal : Nat) : Bx bxVal\n",
+    "def result : Nat := 0\n", "TYPE_MISMATCH");
+  failed += !domain_accepts("block header uses the settled universe of an earlier sort",
+    "family Ax := ax (axType : Type 0) "
+    "and Bx : ((fun (T : Type 1) => T) Ax) -> Type 0 := bx (bxVal : Ax) : Bx bxVal\n",
+    "def result : Type 1 := Ax\n");
+  failed += !domain_accepts("block field uses the settled universe of a later sort",
+    "family Ax := ax (axField : Bx ((fun (T : Type 1) => Nat) (Bx Nat))) "
+    "and Bx : Type 0 -> Type 0 := bx (bxType : Type 0) : Bx bxType\n",
+    "def result : Type 1 := Ax\n");
+  failed += !domain_refuses("settled block headers keep exact universe equality",
+    "family Ax := ax (axType : Type 0) "
+    "and Bx : ((fun (T : Type 0) => T) Ax) -> Type 0 := bx (bxVal : Ax) : Bx bxVal\n",
+    "def result : Nat := 0\n", "TYPE_MISMATCH");
+  failed += !domain_refuses("settled block fields keep exact universe equality",
+    "family Ax := ax (axField : Bx ((fun (T : Type 0) => Nat) (Bx Nat))) "
+    "and Bx : Type 0 -> Type 0 := bx (bxType : Type 0) : Bx bxType\n",
+    "def result : Nat := 0\n", "TYPE_MISMATCH");
+  failed += !domain_refuses("settled block universes are not cumulative",
+    "family Ax := ax (axVal : Nat) "
+    "and Bx : ((fun (T : Type 1) => T) Ax) -> Type 0 := bx (bxVal : Ax) : Bx bxVal\n",
+    "def result : Nat := 0\n", "TYPE_MISMATCH");
+  failed += !domain_roundtrip("elim motive inference distinguishes a case from the scrutinee",
+    "family Fx := fx0 | fx1 family Gx := gx\n",
+    "def run : Fx -> Gx := fun (x : Fx) => elim (fun (u : Fx) => Gx) gx gx x\n");
+  failed += !domain_accepts("bare partial elim supplies the scrutinee before selecting a family",
+    "family Fx := fx0 | fx1 family Gx := gx\n",
+    "def run : Fx -> Gx := elim (fun u => Gx) gx gx\n");
+  failed += !domain_roundtrip("elim motive inference validates arguments after a function result",
+    "family Fx := fx0 | fx1 family Gx := gx family Hx := hx0 | hx1 | hx2\n",
+    "def run : Fx -> Hx -> Gx := fun (x : Fx) (y : Hx) => "
+    "elim (fun (u : Fx) => Hx -> Gx) (fun (z : Hx) => gx) (fun (z : Hx) => gx) x y\n");
+  failed += !domain_roundtrip("indexed dependent elim motive round trip", "",
+    "def identityProof : (n : Nat) -> (v : Vec Nat n) -> Path (Vec Nat n) v v := fun (n : Nat) (v : Vec Nat n) => "
+    "elim (fun (k : Nat) (w : Vec Nat k) => Path (Vec Nat k) w w) refl "
+    "(fun l h t ih => refl) (fun l x y r ih => fun (i : I) => refl) v\n");
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

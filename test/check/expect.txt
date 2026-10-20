@@ -58,3 +58,10 @@ trunc0-no-set.lang TYPE_MISMATCH
 fin-case-arity.lang FIN_CASE
 fin-case-branch.lang FIN_CASE
 fin-one-not-empty.lang FIN_CASE
+indexed-fold-missing-case.lang TYPE_MISMATCH
+block-fold-target.lang TYPE_MISMATCH
+block-fold-missing-case.lang TYPE_MISMATCH
+elim-family-count.lang TYPE_MISMATCH
+elim-motive-index.lang TYPE_MISMATCH
+elim-block.lang TYPE_MISMATCH
+elim-path-case.lang PATH_END

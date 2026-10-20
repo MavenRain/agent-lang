@@ -37,6 +37,20 @@ family Quot (A : Type 0) (R : A -> A -> Type 0) := quot (quotOf : A)
   | quotEq (quotA : A) (quotB : A) (quotR : R quotA quotB) (i : I) [ ~i -> quot A R quotA, i -> quot A R quotB ]
   | quotSquash (quotFrom : Quot A R) (quotTo : Quot A R) (quotLeft : Path (Quot A R) quotFrom quotTo) (quotRight : Path (Quot A R) quotFrom quotTo) (i : I) (j : I)
     [ ~i -> quotLeft @ j, i -> quotRight @ j, ~j -> quotFrom, j -> quotTo ]
+-- A vector, an indexed higher inductive family (S2, Q1 and Q2 (a)): the
+-- index is the guest Nat, vswap is a path constructor at an index.
+family Vec (A : Type 0) : Nat -> Type 0 := vnil : Vec A 0
+  | vcons (consLen : Nat) (consHead : A) (consTail : Vec A consLen) : Vec A (succ consLen)
+  | vswap (swapLen : Nat) (swapX : A) (swapY : A) (swapRest : Vec A swapLen) (i : I) : Vec A (succ (succ swapLen))
+    [ ~i -> vcons A (succ swapLen) swapX (vcons A swapLen swapY swapRest), i -> vcons A (succ swapLen) swapY (vcons A swapLen swapX swapRest) ]
+-- A mutual block (S2, Q1 and Q5 (a)): Ratified is indexed by Charter, adopt
+-- names Ratified, adoptTwice is a path constructor, no squash constructor.
+family Charter (R : Type 0) := genesis
+  | adopt (adoptBase : Charter R) (adoptRule : Ratified R adoptBase)
+  | adoptTwice (twiceBase : Charter R) (twiceRule : R) (i : I)
+    [ ~i -> adopt R twiceBase (ratify R twiceBase twiceRule),
+      i -> adopt R (adopt R twiceBase (ratify R twiceBase twiceRule)) (ratify R (adopt R twiceBase (ratify R twiceBase twiceRule)) twiceRule) ]
+and Ratified (R : Type 0) : Charter R -> Type 0 := ratify (ratifyBase : Charter R) (ratifyRule : R) : Ratified R ratifyBase
 
 -- Kan library (S2a, R6 (a)): transport, subst, J and the J rule as a path
 -- (JRefl, O11), all by transp.
