@@ -1,6 +1,6 @@
 entries addPrice 2 3 => 5
-entries addPrice 18446744073709551615 1 => trap
-entries scale 4294967296 4294967296 => trap
+entries addPrice 18446744073709551615 1 => 18446744073709551616
+entries scale 4294967296 4294967296 => 18446744073709551616
 entries discount 3 5 => 0
 entries cheap 100 => 1
 entries cheap 101 => 0
@@ -59,3 +59,36 @@ elim vecSwapE => fun i => vswap (Fin 2) 0 1 0 (vnil (Fin 2)) i
 elim quotThreeE => trunc0 (Fin 4) 2
 elim quotEqAtE => fun i => trunc0 (Fin 4) 2
 elim hcompE => fun j => elim (fun k => fun w => Vec (Fin 2) k) (vnil (Fin 2)) (fun _x0 => fun _x1 => fun _x2 => fun ih => vcons (Fin 2) _x0 (finAdd 2 _x1 1) ih) (fun _x0 => fun _x1 => fun _x2 => fun _x3 => fun ih => fun i => vswap (Fin 2) _x0 (finAdd 2 _x1 1) (finAdd 2 _x2 1) ih i) (hcomp (Vec (Fin 2) 2) (j \/ ~j) (fun i => [ ~j -> vcons (Fin 2) 1 0 (vcons (Fin 2) 0 1 (vnil (Fin 2))), j -> vswap (Fin 2) 0 0 1 (vnil (Fin 2)) i ]) (vcons (Fin 2) 1 0 (vcons (Fin 2) 0 1 (vnil (Fin 2)))))
+text greeting => "hello, world"
+text middle => "el"
+text clamped => "o"
+text empty => ""
+text helloLength => 5
+text sameText => 1
+text validUtf8 => 1
+text overlong => 0
+text rawBytes => "\xc0\x80"
+text bigSum => 18446744073709551616
+text bigShown => "18446744073709551616"
+int64 addSmall => 5
+int64 negFive => -5
+int64 product => -24
+int64 wrapped => -9223372036854775808
+int64 quotient => some 3
+int64 byZero => none
+int64 remainder => some (int64Neg 1)
+int64 minByMinusOne => none
+int64 lessEq => 1
+int64 same => 1
+int64 toNat => some 42
+int64 negToNat => none
+int64 fromNat => some 9223372036854775807
+int64 tooBig => none
+json doc => inr (jobj (jfCons "id" (jnum (inl 7)) (jfCons "tags" (jarr (jlCons (jstr "a") (jlCons (jbool 1) (jlCons jnull jlNil)))) (jfCons "ratio" (jnum (inr "1.5")) jfNil))))
+json parseError => inl "byte 3: expected a value"
+json rendered => "{\"id\":7,\"ok\":true}"
+json escaped => "\"a\\\"b\\u0001\""
+json roundTrip => fun _ => inr (jarr (jlCons (jnum (inl 1)) (jlCons jnull jlNil)))
+text sumDigits 18446744073709551615 1 => 20
+text tagLength 12345 => 6
+json renderedLength 12 => 4

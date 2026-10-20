@@ -1,0 +1,17 @@
+-- Text (S3): byte strings. Append, slice by byte offsets (clamped), length,
+-- equality and the UTF-8 test give closed values; natShow prints a Nat in
+-- decimal, a big Nat too. The two entries take Nat arguments and build a
+-- Text inside (an entry result is first-order).
+def greeting : Text := textAppend "hello, " "world"
+def middle : Text := textSlice "hello" 1 3
+def clamped : Text := textSlice "hello" 4 9
+def empty : Text := textSlice "hello" 4 2
+def helloLength : Nat := textLength "hello"
+def sameText : Fin 2 := textEq "ab" (textAppend "a" "b")
+def validUtf8 : Fin 2 := textUtf8 "a\xc3\xa9"
+def overlong : Fin 2 := textUtf8 "\xc0\x80"
+def rawBytes : Text := "\xc0\x80"
+def bigSum : Nat := natAdd 18446744073709551615 1
+def bigShown : Text := natShow bigSum
+def sumDigits : (a b : Nat) -> Nat := fun (a b : Nat) => textLength (natShow (natAdd a b))
+def tagLength : (n : Nat) -> Nat := fun (n : Nat) => textLength (textAppend "#" (natShow n))

@@ -16,15 +16,22 @@ kit, or to the root of a generated language.
 
 ## Values
 
-- `Nat` is an unsigned 64-bit integer. Literals larger than
-  18446744073709551615 are refused by the lexer (`test/parse/nat-range.lang`).
-- `natAdd` and `natMul` trap on overflow. `natSub` is truncated at 0.
-  A trap is a value: it stops a computation only when the computation
-  needs it. `langc eval` prints `trap` (`test/eval/expect.txt`).
-  `langc build` refuses an instance that holds a trap (`EVAL_OVERFLOW`).
-- There is no text type. The lexer refuses `"` (`test/parse/string.lang`).
+- `Nat` is an unbounded natural number. Values below 2^64 use a machine
+  word; larger values use limbs. Arithmetic promotes and demotes as needed.
+  `natSub` is truncated at 0. Nat arithmetic does not produce an overflow trap.
+- `Text` holds bytes. Append, equality, byte slicing, length and UTF-8
+  validation operate on those bytes. Slice bounds are clamped to the length.
+- `Int64` holds signed 64-bit integers. Add, subtract, multiply and negate
+  wrap. Division and remainder return `none` for a zero divisor and for
+  the minimum integer divided by -1. Conversions return `none` out of range.
+- `jsonParse` and `jsonRender` use the domain's `Json`, `JsonList` and
+  `JsonFields` families. The checker validates their constructors and field
+  types before admitting a JSON primitive (`JSON_FAMILY` on a mismatch).
 - Values carry no types. The JSON writer gets each type from the
-  definition type and from the family declarations.
+  definition type and from the family declarations. A valid UTF-8 `Text`
+  emits as a JSON string, other bytes as `{"bytes":"HEX"}`, and a large
+  `Nat` as a bare decimal number. An instance containing a trap is refused
+  with `EVAL_TRAP`.
 
 ## Limits
 

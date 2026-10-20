@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "json.h"
+#include "front/big.h"
+#include "front/jsontext.h"
 
 #define JSON_TYPE_MAX 4096u
 
@@ -42,22 +44,55 @@ static int put_text(Out *o, const char *text) {
   return put(o, text, strlen(text));
 }
 
-/* A JSON string. Names and printed types are ASCII; escape all the same. */
-static int put_string(Out *o, const char *text) {
+/* A JSON string of the LEN bytes at TEXT. Names and printed types are
+   ASCII and a Text is valid UTF-8 here; escape all the same. */
+static int put_quoted(Out *o, const char *text, size_t len) {
   char esc[8];
-  const char *p;
+  size_t i;
   int ok = put(o, "\"", 1);
-  for (p = text; ok && *p != '\0'; p++) {
-    unsigned char ch = (unsigned char)*p;
+  for (i = 0; ok && i < len; i++) {
+    unsigned char ch = (unsigned char)text[i];
     int plain = ch >= 0x20 && ch != '"' && ch != '\\';
     if (plain)
-      ok = put(o, p, 1);
+      ok = put(o, text + i, 1);
     else {
       snprintf(esc, sizeof esc, "\\u%04x", ch);
       ok = put(o, esc, 6);
     }
   }
   return ok && put(o, "\"", 1);
+}
+
+static int put_string(Out *o, const char *text) {
+  return put_quoted(o, text, strlen(text));
+}
+
+/* {"bytes":"HEX"}: a Text that is not valid UTF-8, two lowercase hex
+   digits per byte (Q4). */
+static int put_bytes(Out *o, const char *text, size_t len) {
+  static const char digits[] = "0123456789abcdef";
+  char pair[2];
+  size_t i;
+  int ok = put_text(o, "{\"bytes\":\"");
+  for (i = 0; ok && i < len; i++) {
+    unsigned char ch = (unsigned char)text[i];
+    pair[0] = digits[ch >> 4];
+    pair[1] = digits[ch & 15u];
+    ok = put(o, pair, 2);
+  }
+  return ok && put_text(o, "\"}");
+}
+
+/* A big Nat: a bare JSON number of any length (Q6 (a)). */
+static int put_big(Out *o, const Value *v) {
+  Big b;
+  const char *digits = NULL;
+  size_t len = 0;
+  b.limbs = v->limbs;
+  b.count = (uint32_t)v->nat;
+  if (!big_text(o->m->arena, b, &digits, &len))
+    return diag_fail(o->m->diag, "OOM", o->def, "the arena limit is reached");
+  return put(o, digits, len);
 }
 
 static int refuse(Out *o, const char *what) {
@@ -79,7 +114,7 @@ static int ready(Out *o, const Value *v) {
   case VAL_PLAM:
     return 1;
   case VAL_TRAP:
-    return diag_fail(o->m->diag, "EVAL_OVERFLOW", o->def, "the instance value traps (a Nat overflow)");
+    return diag_fail(o->m->diag, "EVAL_TRAP", o->def, "the instance value is a trap");
   case VAL_UNIV:
   case VAL_PI:
   case VAL_SIGMA:
@@ -204,12 +239,18 @@ static int op_json(Out *o, const Value *type, const Value *v) {
   switch (type->op) {
   case OP_NAT:
   case OP_FIN:
+    if (v->kind == VAL_BIG)
+      return put_big(o, v);
     if (v->kind != VAL_NAT)
       return internal(o, "a Nat or Fin value that is not a number");
     snprintf(num, sizeof num, "%llu", (unsigned long long)v->nat);
     return put_text(o, num);
   case OP_TEXT:
-    return internal(o, "a Text value (S3 chunk B)");
+    if (v->kind != VAL_TEXT)
+      return internal(o, "a Text value that is not a text");
+    if (text_utf8_valid(v->name, v->nat))
+      return put_quoted(o, v->name, (size_t)v->nat);
+    return put_bytes(o, v->name, (size_t)v->nat);
   case OP_INT64:
     if (v->kind != VAL_INT64)
       return internal(o, "an Int64 value that is not a number");

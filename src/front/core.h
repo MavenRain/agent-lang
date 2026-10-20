@@ -331,7 +331,6 @@ typedef struct {
   uint32_t ctor_cap;
   unsigned depth;
   uint64_t fuel;
-  int overflowed;
   uint32_t fresh; /* the count of fresh levels for the Kan head test */
   /* Each Glue that a true key reduced, newest first. transp at Glue reads
      them to get A, phi and sys at an end. */

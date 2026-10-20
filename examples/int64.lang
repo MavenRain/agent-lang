@@ -1,0 +1,18 @@
+-- Int64 (S3): signed 64-bit integers. Add, sub, mul and neg wrap (two's
+-- complement). Div and rem give none at a zero divisor and at the minimum
+-- divided by -1. The conversions give none out of range. A literal is not
+-- negative: int64Neg gives -5.
+def addSmall : Int64 := int64Add 2 3
+def negFive : Int64 := int64Neg 5
+def product : Int64 := int64Mul (int64Neg 4) 6
+def wrapped : Int64 := int64Add 9223372036854775807 1
+def quotient : Option Int64 := int64Div 7 2
+def byZero : Option Int64 := int64Div 7 0
+def remainder : Option Int64 := int64Rem (int64Neg 7) 2
+def minByMinusOne : Option Int64 := int64Div (int64Sub (int64Neg 9223372036854775807) 1) (int64Neg 1)
+def lessEq : Fin 2 := int64Le (int64Neg 1) 0
+def same : Fin 2 := int64Eq 3 (int64Sub 5 2)
+def toNat : Option Nat := int64ToNat 42
+def negToNat : Option Nat := int64ToNat (int64Neg 1)
+def fromNat : Option Int64 := natToInt64 9223372036854775807
+def tooBig : Option Int64 := natToInt64 9223372036854775808

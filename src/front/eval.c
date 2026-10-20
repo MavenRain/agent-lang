@@ -1,6 +1,8 @@
 /* The evaluator, the conversion test, quote and the printer (see
    front/core.h). SHARED by the tcc kits. */
 #include "front/core.h"
+#include "front/big.h"
+#include "front/jsontext.h"
 
 #include <string.h>
 
@@ -147,9 +149,40 @@ static const Value *val_trap(Machine *m) {
   return new_value(m, VAL_TRAP);
 }
 
-static const Value *overflow(Machine *m) {
-  m->overflowed = 1;
-  return val_trap(m);
+/* 1 when V is a Nat value: a machine word or a big Nat (S3 chunk B). */
+static int is_nat(const Value *v) {
+  return v->kind == VAL_NAT || v->kind == VAL_BIG;
+}
+
+/* The Big of a Nat value. 0 on exhaustion. */
+static int big_of(Machine *m, const Value *v, Big *out) {
+  if (v->kind == VAL_BIG) {
+    out->limbs = v->limbs;
+    out->count = (uint32_t)v->nat;
+    return 1;
+  }
+  return big_from_u64(m->arena, v->nat, out);
+}
+
+/* The Nat value of B in normal form (Q3 (a)): a VAL_NAT below 2^64, else a
+   VAL_BIG. */
+static const Value *nat_of_big(Machine *m, Big b) {
+  uint64_t n = 0;
+  if (big_fits_u64(b, &n))
+    return val_nat(m, n);
+  return val_big(m, b.limbs, b.count);
+}
+
+typedef int (*BigOp)(Arena *arena, Big x, Big y, Big *out);
+
+/* F at the Nat values X and Y over big limbs, demoted to the normal form. */
+static const Value *big_arith(Machine *m, const Value *x, const Value *y, BigOp f) {
+  Big bx;
+  Big by;
+  Big r;
+  if (!big_of(m, x, &bx) || !big_of(m, y, &by) || !f(m->arena, bx, by, &r))
+    return oom(m);
+  return nat_of_big(m, r);
 }
 
 const Value *val_var(Machine *m, uint32_t level) {
@@ -850,11 +883,15 @@ static const Value *reduce_fold_nat(Machine *m, const Value *const *a, uint32_t 
   const Value *acc = a[1];
   const Value *out;
   uint64_t k;
+  uint64_t count;
   if (blocked(m, a[2], OP_FOLD_NAT, 0, 0, a, n, &out))
     return out;
-  if (a[2]->kind != VAL_NAT)
+  if (!is_nat(a[2]))
     return internal(m, "a fold of a value that is not a Nat");
-  for (k = 0; k < a[2]->nat && acc != NULL; k++)
+  /* A big bound exceeds the machine's fuel, so this loop fails before
+     reaching UINT64_MAX. It still evaluates steps in the usual order. */
+  count = a[2]->kind == VAL_BIG ? UINT64_MAX : a[2]->nat;
+  for (k = 0; k < count && acc != NULL; k++)
     acc = spend(m, 1) ? apply_value(m, a[0], acc) : NULL;
   return acc;
 }
@@ -1143,7 +1180,7 @@ static const Value *reduce_elim(Machine *m, uint32_t inst, uint32_t field, const
 }
 
 /* 1 when the step result R ends the list. *TAIL is then the end. */
-static int unfold_end(Machine *m, const Value *g, uint64_t left, const Value *seed, const Value *r, const Value **tail) {
+static int unfold_end(Machine *m, const Value *g, const Value *limit, uint64_t used, const Value *seed, const Value *r, const Value **tail) {
   const Value *p = val_is(r, OP_SOME) ? r->args[0] : r;
   if (val_is(r, OP_NONE)) {
     *tail = constant(m, OP_NIL);
@@ -1153,9 +1190,13 @@ static int unfold_end(Machine *m, const Value *g, uint64_t left, const Value *se
   case SCRUT_TRAP:
     *tail = p;
     return 1;
-  case SCRUT_NEUTRAL:
-    *tail = make(m, VAL_STUCK, OP_UNFOLD, 0, 3, g, val_nat(m, left), seed);
+  case SCRUT_NEUTRAL: {
+    const Value *spent = val_nat(m, used);
+    const Value *left = spent == NULL ? NULL : limit->kind == VAL_BIG
+      ? big_arith(m, limit, spent, big_sub) : val_nat(m, limit->nat - used);
+    *tail = make(m, VAL_STUCK, OP_UNFOLD, 0, 3, g, left, seed);
     return 1;
+  }
   case SCRUT_VALUE:
     break;
   }
@@ -1173,16 +1214,18 @@ static const Value *reduce_unfold(Machine *m, const Value *const *a, uint32_t n)
   const Value *tail = NULL;
   ValBuf items;
   uint64_t i;
+  uint64_t limit;
   if (blocked(m, a[1], OP_UNFOLD, 0, 0, a, n, &out))
     return out;
-  if (a[1]->kind != VAL_NAT)
+  if (!is_nat(a[1]))
     return internal(m, "an unfold limit that is not a Nat");
+  limit = a[1]->kind == VAL_BIG ? UINT64_MAX : a[1]->nat;
   buf_init(&items);
-  for (i = 0; i < a[1]->nat; i++) {
+  for (i = 0; i < limit; i++) {
     r = spend(m, 1) ? apply_value(m, a[0], seed) : NULL;
     if (r == NULL)
       return NULL;
-    if (unfold_end(m, a[0], a[1]->nat - i, seed, r, &tail))
+    if (unfold_end(m, a[0], a[1], i, seed, r, &tail))
       return build_list(m, items.items, items.count, tail);
     if (!buf_push(m, &items, r->args[0]->args[0]))
       return NULL;
@@ -1265,7 +1308,7 @@ static int nat_args(Machine *m, Op op, const Value *const *a, uint32_t n, uint64
     return 0;
   if (nat_blocked(m, a[0], op, a, n, out) || nat_blocked(m, a[1], op, a, n, out))
     return 0;
-  if (a[0]->kind != VAL_NAT || a[1]->kind != VAL_NAT) {
+  if (!is_nat(a[0]) || !is_nat(a[1])) {
     *out = internal(m, "a Nat operation on a value that is not a Nat");
     return 0;
   }
@@ -1280,7 +1323,9 @@ static const Value *nat_add(Machine *m, const Value *const *a, uint32_t n) {
   uint64_t y = 0;
   if (!nat_args(m, OP_NAT_ADD, a, n, &x, &y, &out))
     return out;
-  return x + y < x ? overflow(m) : val_nat(m, x + y);
+  if (a[0]->kind == VAL_BIG || a[1]->kind == VAL_BIG || x + y < x)
+    return big_arith(m, a[0], a[1], big_add);
+  return val_nat(m, x + y);
 }
 
 static const Value *nat_sub(Machine *m, const Value *const *a, uint32_t n) {
@@ -1289,6 +1334,8 @@ static const Value *nat_sub(Machine *m, const Value *const *a, uint32_t n) {
   uint64_t y = 0;
   if (!nat_args(m, OP_NAT_SUB, a, n, &x, &y, &out))
     return out;
+  if (a[0]->kind == VAL_BIG || a[1]->kind == VAL_BIG)
+    return big_arith(m, a[0], a[1], big_sub);
   return val_nat(m, x < y ? 0 : x - y);
 }
 
@@ -1298,7 +1345,9 @@ static const Value *nat_mul(Machine *m, const Value *const *a, uint32_t n) {
   uint64_t y = 0;
   if (!nat_args(m, OP_NAT_MUL, a, n, &x, &y, &out))
     return out;
-  return y != 0 && x > UINT64_MAX / y ? overflow(m) : val_nat(m, x * y);
+  if (a[0]->kind == VAL_BIG || a[1]->kind == VAL_BIG || (y != 0 && x > UINT64_MAX / y))
+    return big_arith(m, a[0], a[1], big_mul);
+  return val_nat(m, x * y);
 }
 
 /* succ a: a + 1. */
@@ -1308,9 +1357,13 @@ static const Value *nat_succ(Machine *m, const Value *const *a, uint32_t n) {
     return a[0];
   if (nat_blocked(m, a[0], OP_SUCC, a, n, &out))
     return out;
-  if (a[0]->kind != VAL_NAT)
+  if (!is_nat(a[0]))
     return internal(m, "a Nat operation on a value that is not a Nat");
-  return a[0]->nat == UINT64_MAX ? overflow(m) : val_nat(m, a[0]->nat + 1u);
+  if (a[0]->kind == VAL_BIG || a[0]->nat == UINT64_MAX) {
+    const Value *one = val_nat(m, 1u);
+    return one == NULL ? NULL : big_arith(m, a[0], one, big_add);
+  }
+  return val_nat(m, a[0]->nat + 1u);
 }
 
 /* finAdd n a b: (a + b) mod n, with no overflow. A[0] is n. */
@@ -1472,7 +1525,7 @@ static const Core *core_var(Machine *m, uint32_t index) {
    line from Unit to Empty. finEq and natEq both return Fin 2 (Bool), so
    the line is a finCase on the test. Under the two binders
    p is index 1 and i is index 0. The ends of p are the literals. */
-static const Core *refute_core(Machine *m, int fin, uint64_t k, uint64_t x, uint64_t y) {
+static const Core *refute_core(Machine *m, int fin, uint64_t k, const Core *x, const Core *y) {
   const Core *args[3];
   const Core **ends = arena_alloc(m->arena, 2u * sizeof *ends);
   Core *at = ends == NULL ? NULL : new_core(m, CORE_PAPP);
@@ -1483,8 +1536,8 @@ static const Core *refute_core(Machine *m, int fin, uint64_t k, uint64_t x, uint
   }
   if (at == NULL)
     return NULL;
-  ends[0] = core_leaf(m, CORE_NAT, x);
-  ends[1] = core_leaf(m, CORE_NAT, y);
+  ends[0] = x;
+  ends[1] = y;
   at->a = core_var(m, 1);
   at->b = core_var(m, 0);
   at->args = ends;
@@ -1492,7 +1545,7 @@ static const Core *refute_core(Machine *m, int fin, uint64_t k, uint64_t x, uint
   if (ends[0] == NULL || ends[1] == NULL || at->a == NULL || at->b == NULL)
     return NULL;
   args[0] = core_leaf(m, CORE_NAT, k);
-  args[1] = core_leaf(m, CORE_NAT, x);
+  args[1] = x;
   args[2] = at;
   args[0] = fin ? core_opn(m, OP_FIN_EQ, args, 3) : core_opn(m, OP_NAT_EQ, args + 1, 2);
   args[1] = core_opn(m, OP_EMPTY, NULL, 0);
@@ -1523,12 +1576,26 @@ static const Value *dec_eq(Machine *m, Op op, const Value *const *a, uint32_t n)
   int fin = op == OP_DEC_EQ_FIN;
   int ok = fin ? fin_args3(m, op, a, n, &k, &x, &y, &out) : nat_args(m, op, a, n, &x, &y, &out);
   const Core *body;
+  const Core *cx;
+  const Core *cy;
+  int equal;
   if (!ok)
     return out;
   x = fin ? x % k : x;
   y = fin ? y % k : y;
-  body = x == y ? core_binder(m, CORE_PLAM, "_", core_leaf(m, CORE_NAT, x)) : refute_core(m, fin, k, x, y);
-  return eval_core(m, NULL, core_opn(m, x == y ? OP_INL : OP_INR, &body, 1));
+  if (!fin && (a[0]->kind == VAL_BIG || a[1]->kind == VAL_BIG)) {
+    Big bx;
+    Big by;
+    if (!big_of(m, a[0], &bx) || !big_of(m, a[1], &by))
+      return oom(m);
+    equal = big_cmp(bx, by) == 0;
+  } else {
+    equal = x == y;
+  }
+  cx = fin ? core_leaf(m, CORE_NAT, x) : quote_value(m, 0, a[0]);
+  cy = fin ? core_leaf(m, CORE_NAT, y) : quote_value(m, 0, a[1]);
+  body = equal ? core_binder(m, CORE_PLAM, "_", cx) : refute_core(m, fin, k, cx, cy);
+  return eval_core(m, NULL, core_opn(m, equal ? OP_INL : OP_INR, &body, 1));
 }
 
 /* The finAll case term: k, body0, ..., body(n-1). Body j at the literal j;
@@ -1549,7 +1616,196 @@ static const Value *nat_test(Machine *m, Op op, const Value *const *a, uint32_t 
   uint64_t y = 0;
   if (!nat_args(m, op, a, n, &x, &y, &out))
     return out;
+  if (a[0]->kind == VAL_BIG || a[1]->kind == VAL_BIG) {
+    Big bx;
+    Big by;
+    int order;
+    if (!big_of(m, a[0], &bx) || !big_of(m, a[1], &by))
+      return oom(m);
+    order = big_cmp(bx, by);
+    return bool_val(m, op == OP_NAT_EQ ? order == 0 : order <= 0);
+  }
   return bool_val(m, op == OP_NAT_EQ ? x == y : x <= y);
+}
+
+/* The argument kinds of the S3 operations (S3 chunk B). VAL_NAT accepts a
+   big Nat too. */
+static const ValKind KINDS_TEXT[] = {VAL_TEXT, VAL_TEXT};
+static const ValKind KINDS_SLICE[] = {VAL_TEXT, VAL_NAT, VAL_NAT};
+static const ValKind KINDS_NAT[] = {VAL_NAT};
+static const ValKind KINDS_INT64[] = {VAL_INT64, VAL_INT64};
+
+/* 1 when the N arguments of the S3 operation OP are values of the kinds
+   KINDS. Else *OUT is the first trap argument, the stuck operation (a
+   neutral argument or a glue element), or the internal failure. */
+static int prim_args(Machine *m, Op op, const Value *const *a, uint32_t n, const ValKind *kinds, const Value **out) {
+  uint32_t i;
+  for (i = 0; i < n; i++) {
+    if (a[i]->kind == VAL_TRAP) {
+      *out = a[i];
+      return 0;
+    }
+  }
+  for (i = 0; i < n; i++) {
+    if (nat_blocked(m, a[i], op, a, n, out))
+      return 0;
+  }
+  for (i = 0; i < n; i++) {
+    if (kinds[i] == VAL_NAT ? !is_nat(a[i]) : a[i]->kind != kinds[i]) {
+      *out = internal(m, "an S3 operation on an argument of the wrong kind");
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/* A Text of the LEN bytes at BYTES, copied into the arena with an end 0
+   byte. */
+static const Value *text_copy(Machine *m, const char *bytes, uint64_t len) {
+  char *copy = len >= (uint64_t)SIZE_MAX ? NULL : arena_alloc(m->arena, (size_t)len + 1u);
+  if (copy == NULL)
+    return oom(m);
+  if (len > 0u)
+    memcpy(copy, bytes, (size_t)len);
+  copy[len] = '\0';
+  return val_text(m, copy, len);
+}
+
+/* textAppend a b: the bytes of a, then the bytes of b. */
+static const Value *text_append(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *out;
+  char *joined;
+  uint64_t len;
+  if (!prim_args(m, OP_TEXT_APPEND, a, n, KINDS_TEXT, &out))
+    return out;
+  if (a[0]->nat + a[1]->nat < a[0]->nat)
+    return oom(m);
+  len = a[0]->nat + a[1]->nat;
+  joined = len >= (uint64_t)SIZE_MAX ? NULL : arena_alloc(m->arena, (size_t)len + 1u);
+  if (joined == NULL)
+    return oom(m);
+  if (a[0]->nat > 0u)
+    memcpy(joined, a[0]->name, (size_t)a[0]->nat);
+  if (a[1]->nat > 0u)
+    memcpy(joined + a[0]->nat, a[1]->name, (size_t)a[1]->nat);
+  joined[len] = '\0';
+  return val_text(m, joined, len);
+}
+
+/* textEq a b: 1 when the bytes agree. */
+static const Value *text_eq(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *out;
+  if (!prim_args(m, OP_TEXT_EQ, a, n, KINDS_TEXT, &out))
+    return out;
+  return bool_val(m, a[0]->nat == a[1]->nat && (a[0]->nat == 0u || memcmp(a[0]->name, a[1]->name, (size_t)a[0]->nat) == 0));
+}
+
+/* The Nat value V, clamped to LIMIT. */
+static uint64_t clamp_nat(const Value *v, uint64_t limit) {
+  return v->kind == VAL_BIG || v->nat > limit ? limit : v->nat;
+}
+
+/* textSlice a from to: the bytes at the indices from up to to. Each bound
+   is clamped to the length; empty when from >= to. */
+static const Value *text_slice(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *out;
+  uint64_t from;
+  uint64_t to;
+  if (!prim_args(m, OP_TEXT_SLICE, a, n, KINDS_SLICE, &out))
+    return out;
+  from = clamp_nat(a[1], a[0]->nat);
+  to = clamp_nat(a[2], a[0]->nat);
+  return text_copy(m, a[0]->name + from, from >= to ? 0u : to - from);
+}
+
+/* textLength a and textUtf8 a. */
+static const Value *text_measure(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  const Value *out;
+  if (!prim_args(m, op, a, n, KINDS_TEXT, &out))
+    return out;
+  if (op == OP_TEXT_LENGTH)
+    return val_nat(m, a[0]->nat);
+  return bool_val(m, text_utf8_valid(a[0]->name, a[0]->nat));
+}
+
+/* natShow n: the decimal digits of n, a big Nat too. */
+static const Value *nat_show(Machine *m, const Value *const *a, uint32_t n) {
+  const Value *out;
+  const char *digits;
+  size_t len;
+  Big b;
+  if (!prim_args(m, OP_NAT_SHOW, a, n, KINDS_NAT, &out))
+    return out;
+  if (!big_of(m, a[0], &b) || !big_text(m->arena, b, &digits, &len))
+    return oom(m);
+  return val_text(m, digits, len);
+}
+
+/* int64Add, int64Sub, int64Mul a b: modulo 2^64, computed in uint64_t;
+   int64Neg a likewise. */
+static const Value *int64_arith(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  const Value *out;
+  uint64_t x;
+  uint64_t y;
+  if (!prim_args(m, op, a, n, KINDS_INT64, &out))
+    return out;
+  x = (uint64_t)a[0]->i64;
+  y = op == OP_INT64_NEG ? 0u : (uint64_t)a[1]->i64;
+  if (op == OP_INT64_NEG)
+    return val_int64(m, (int64_t)(0u - x));
+  if (op == OP_INT64_MUL)
+    return val_int64(m, (int64_t)(x * y));
+  return val_int64(m, (int64_t)(op == OP_INT64_ADD ? x + y : x - y));
+}
+
+/* int64Div, int64Rem a b: some of the quotient toward zero, or of the
+   remainder; none at b = 0 and at INT64_MIN / -1. */
+static const Value *int64_div(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  const Value *out;
+  int64_t x;
+  int64_t y;
+  if (!prim_args(m, op, a, n, KINDS_INT64, &out))
+    return out;
+  x = a[0]->i64;
+  y = a[1]->i64;
+  if (y == 0 || (x == INT64_MIN && y == -1))
+    return constant(m, OP_NONE);
+  return make(m, VAL_OP, OP_SOME, 0, 1, val_int64(m, op == OP_INT64_DIV ? x / y : x % y), NULL, NULL);
+}
+
+/* int64Eq, int64Le a b. */
+static const Value *int64_test(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  const Value *out;
+  if (!prim_args(m, op, a, n, KINDS_INT64, &out))
+    return out;
+  return bool_val(m, op == OP_INT64_EQ ? a[0]->i64 == a[1]->i64 : a[0]->i64 <= a[1]->i64);
+}
+
+/* int64ToNat a: some a when a >= 0, else none. natToInt64 n: some n when
+   n <= 2^63 - 1, else none (a big Nat too). */
+static const Value *int64_convert(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  const Value *out;
+  int to_nat = op == OP_INT64_TO_NAT;
+  if (!prim_args(m, op, a, n, to_nat ? KINDS_INT64 : KINDS_NAT, &out))
+    return out;
+  if (to_nat)
+    return a[0]->i64 < 0 ? constant(m, OP_NONE) : make(m, VAL_OP, OP_SOME, 0, 1, val_nat(m, (uint64_t)a[0]->i64), NULL, NULL);
+  if (a[0]->kind == VAL_BIG || a[0]->nat > (uint64_t)INT64_MAX)
+    return constant(m, OP_NONE);
+  return make(m, VAL_OP, OP_SOME, 0, 1, val_int64(m, (int64_t)a[0]->nat), NULL, NULL);
+}
+
+/* jsonParse t and jsonRender j over front/jsontext.c. A neutral argument
+   gives the stuck operation. */
+static const Value *json_op(Machine *m, Op op, const Value *const *a, uint32_t n) {
+  static const ValKind KINDS_PARSE[] = {VAL_TEXT};
+  static const ValKind KINDS_RENDER[] = {VAL_OP};
+  const Value *out;
+  if (!prim_args(m, op, a, n, op == OP_JSON_PARSE ? KINDS_PARSE : KINDS_RENDER, &out))
+    return out;
+  if (op == OP_JSON_PARSE)
+    return json_parse_value(m, a[0]);
+  return json_render_value(m, a[0]);
 }
 
 static const Value *reduce_proj(Machine *m, uint32_t inst, uint32_t field, const Value *const *a, uint32_t n) {
@@ -3079,24 +3335,33 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_NAT_LE:
     return nat_test(m, op, a, n);
   case OP_TEXT_APPEND:
+    return text_append(m, a, n);
   case OP_TEXT_EQ:
+    return text_eq(m, a, n);
   case OP_TEXT_SLICE:
+    return text_slice(m, a, n);
   case OP_TEXT_LENGTH:
   case OP_TEXT_UTF8:
+    return text_measure(m, op, a, n);
   case OP_NAT_SHOW:
+    return nat_show(m, a, n);
   case OP_INT64_ADD:
   case OP_INT64_SUB:
   case OP_INT64_MUL:
   case OP_INT64_NEG:
+    return int64_arith(m, op, a, n);
   case OP_INT64_DIV:
   case OP_INT64_REM:
+    return int64_div(m, op, a, n);
   case OP_INT64_EQ:
   case OP_INT64_LE:
+    return int64_test(m, op, a, n);
   case OP_INT64_TO_NAT:
   case OP_NAT_TO_INT64:
+    return int64_convert(m, op, a, n);
   case OP_JSON_PARSE:
   case OP_JSON_RENDER:
-    return val_op(m, VAL_STUCK, op, 0, 0, a, n); /* S3 chunk B evaluates it */
+    return json_op(m, op, a, n);
   case OP_ABSURD:
     return val_op(m, VAL_STUCK, OP_ABSURD, 0, 0, a, n);
   case OP_PROJ:
@@ -3880,12 +4145,30 @@ static void print_other(Printer *p, const Value *v, int atom) {
     put(p, num);
     return;
   case VAL_INT64:
-    snprintf(num, sizeof num, "%lld", (long long)v->i64);
-    put(p, num);
+    if (v->i64 >= 0) {
+      snprintf(num, sizeof num, "%lld", (long long)v->i64);
+      put(p, num);
+    } else {
+      if (atom) put(p, "(");
+      if (v->i64 == INT64_MIN) {
+        put(p, "int64Add 9223372036854775807 1");
+      } else {
+        snprintf(num, sizeof num, "%llu", (unsigned long long)(0u - (uint64_t)v->i64));
+        put(p, "int64Neg ");
+        put(p, num);
+      }
+      if (atom) put(p, ")");
+    }
     return;
-  case VAL_BIG:
-    put(p, "<big>");
+  case VAL_BIG: {
+    Big b;
+    const char *text = NULL;
+    size_t len = 0;
+    b.limbs = v->limbs;
+    b.count = (uint32_t)v->nat;
+    put(p, big_text(p->m->arena, b, &text, &len) ? text : "?");
     return;
+  }
   case VAL_TEXT:
     print_text(p, v);
     return;

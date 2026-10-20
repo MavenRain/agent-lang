@@ -423,3 +423,86 @@ Review fixes: a failed limb allocation reports `OOM` instead of checking
 the literal as `UINT64_MAX`. Literal composition uses the same head rule
 for `Text`, `Int64`, big Nat and word Nat values. The Json number tests
 accept both sum branches and refuse a bare Nat payload.
+
+### Chunk B: eval and JSON
+
+Chunk B evaluates the 18 operations of chunk A and emits the S3 values.
+A Nat is a word (`VAL_NAT`) below 2^64 and little-endian base 2^32 limbs
+(`VAL_BIG`, `src/front/big.c`) at or above it: `natAdd`, `natSub`,
+`natMul`, `succ`, `natEq` and `natLe` promote and demote, so each number
+has one normal form, and the `EVAL_OVERFLOW` trap at the Nat operations
+is gone. `textAppend`, `textEq`, `textSlice` (byte offsets, clamped),
+`textLength`, `textUtf8` and `natShow` work on bytes. The Int64
+arithmetic wraps; `int64Div` and `int64Rem` give `none` at a zero divisor
+and at the minimum divided by -1; `int64ToNat` and `natToInt64` give
+`none` out of range. `jsonParse` and `jsonRender` (`src/front/jsontext.c`)
+read and write the domain `Json` tree. `langc eval` prints a Text, Int64,
+big Nat, Sum, Option or constructor result in the surface syntax. json.c
+writes a valid UTF-8 `Text` as a JSON string, any other `Text` as
+`{"bytes":"HEX"}`, and a big Nat as a bare number (formers/tcc-json.md
+`## S3 shapes`).
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 26 | +3 (`text.lang`, `int64.lang`, `json.lang`) |
+| parse refusals | 13 | 0 |
+| check refusals | 71 | 0 |
+| evals | 94 | +33 (11 text, 14 int64, 5 json, 3 entry rows; rows 2 and 3 give `18446744073709551616`) |
+| json goldens | 26 | +3 (`text.json`, `int64.json`, `json.json`) |
+| build refusals | 3 | 0 (`trap.lang` is a fuel trap, `EVAL_FUEL`) |
+| regressions | 6 | 0 (the source list gets `big` and `jsontext`) |
+| printer regressions | 2 | 0 |
+| path regressions | 144 | +25 (four base-type paths and 21 review regressions) |
+
+Deviations:
+
+- (a) The path regressions start at 119 (the chunk A commit has its
+  review fixes), so the initial target is 123, not 115. The review adds
+  21 cases for a final count of 144.
+- (b) `jnum` carries `Sum Int64 Text` (Q7 (a)): `jsonParse` gives `jnum
+  (inl n)` for an integer that fits Int64 and `jnum (inr text)` for each
+  other number (a fraction, an exponent, out of range). `jsonRender` writes
+  `inl n` in decimal and `inr t` as it is.
+- (c) A big Nat in a JSON document is a bare number of any length (Q6
+  (a)), not a decimal string.
+- (d) `test/emit/trap.lang` is a fuel trap with the row `trap.lang
+  EVAL_FUEL` (Q9), since a Nat sum does not trap now.
+- (e) The trap code of `ready` in json.c is `EVAL_TRAP` "the instance
+  value is a trap", not `EVAL_OVERFLOW` (docs/host/README.md and
+  CAPABILITY.md have the new name).
+- (f) The fuel trap is the identity fold `fold (fun (acc : Nat) => acc) 0
+  18446744073709551615` (0.35 s): a `natAdd` fold uses all of the 1 GiB
+  arena (`OOM`) before 20000000 steps, since each step allocates a value.
+- (g) `test/regressions.js` compiles its own source list, so it gets
+  `big` and `jsontext` beside the Makefile `FRONT`.
+- (h) `langc eval` prints a result that is not a Nat in the surface
+  syntax (`"abcd"`, `-5`, `some 3`, `inl "byte 3: expected a value"`).
+  The arguments stay Nat (`src/main.c` does not change).
+- (i) `text_utf8_valid` is in jsontext.c: `textUtf8` in eval.c and the
+  `Text` emission in json.c use it.
+- (j) `jsonParse` keeps the bytes at or above 0x80 as they are (no UTF-8
+  test), keeps duplicate keys in order, gives `jnum (inl 0)` for `-0`,
+  refuses a lone surrogate escape and stops at 512 levels of nesting
+  (`inl "byte N: the nesting is deeper than 512 levels"`; `jsonRender`
+  gives `EVAL_DEPTH` there). `jsonRender` writes `"`, `\` and the bytes
+  below 0x20 as escapes (`\u00xx` in lowercase).
+- (k) Each S3 operation is stuck at a glue element argument.
+- (l) An entry has a first-order result (`check.h`), so a function to
+  `Text` is not an entry. The entries of `text.lang` (`sumDigits`,
+  `tagLength`) and `json.lang` (`renderedLength`) build a `Text` and give
+  its length; `int64.lang` has closed instances only.
+- (m) No `text-slice-bounds.lang` check row: `textSlice` clamps its
+  offsets, so no slice is an error.
+- The `trap` branch of `test/gate.sh` (the `EVAL_OVERFLOW` eval rows) is
+  dead: no eval row gives `trap` now. It stays.
+
+
+Review fixes: `textAppend` copies each input's own length. JSON numbers
+with leading zeros are rejected, and JSON primitives validate the complete
+domain schema before constructing values. `decEqNat` compares and quotes
+full large numbers. Fold and unfold accept large Nat bounds and preserve
+the remaining bound when unfolding becomes neutral. Negative Int64 normal
+forms print as source expressions, including the minimum integer; a closed
+Int64 eval still prints a signed decimal. The C regression suite adds 21
+review cases, including carry and borrow boundaries, and passes all 144
+cases under TinyCC and under Clang AddressSanitizer and UndefinedBehaviorSanitizer.

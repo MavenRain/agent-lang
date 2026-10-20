@@ -4,6 +4,8 @@
    hint) or its type is inferred. Two types are equal when their normal forms
    are equal (front/eval.c). The checker writes core terms (front/core.h). */
 #include "front/check.h"
+#include "front/big.h"
+#include "front/jsontext.h"
 
 #include <string.h>
 
@@ -2201,6 +2203,8 @@ static const Core *rule_int64(Call *k) {
 static const Value *json_type(Checker *c) {
   Machine *m = c->m;
   uint32_t i;
+  if (!json_shapes_valid(m))
+    return NULL;
   for (i = 0; i < m->family_count; i++) {
     if (strcmp(m->families[i].name, "Json") == 0)
       return val_op(m, VAL_OP, OP_FAMILY, i, 0, NULL, 0);
@@ -2950,29 +2954,14 @@ static const Core *core_text(Checker *c, const char *bytes, uint64_t len) {
   return k;
 }
 
-/* The little-endian base 2^32 limbs of a decimal span (ADAPT of the
-   orbit-lang u256_scale_add step to a variable limb count). The span of
-   LEN digits needs at most LEN / 9 + 2 limbs. NULL on exhaustion. */
+/* The little-endian base 2^32 limbs of a decimal span (big_parse of
+   front/big.c, S3 chunk B). NULL on exhaustion. */
 static const uint32_t *parse_limbs(Checker *c, const char *digits, uint32_t *count) {
-  size_t len = strlen(digits);
-  uint32_t *limbs = arena_alloc(c->m->arena, (len / 9u + 2u) * sizeof *limbs);
-  uint32_t n = 0;
-  size_t i;
-  if (limbs == NULL)
+  Big b;
+  if (!big_parse(c->m->arena, digits, strlen(digits), &b))
     return NULL;
-  for (i = 0; i < len; i++) {
-    uint64_t carry = (uint64_t)(unsigned char)digits[i] - (uint64_t)'0';
-    uint32_t j;
-    for (j = 0; j < n; j++) {
-      uint64_t p = (uint64_t)limbs[j] * 10u + carry;
-      limbs[j] = (uint32_t)p;
-      carry = p >> 32;
-    }
-    if (carry != 0u)
-      limbs[n++] = (uint32_t)carry;
-  }
-  *count = n;
-  return limbs;
+  *count = b.count;
+  return b.limbs;
 }
 
 /* A Nat literal (S3 chunk A). A span at or above 2^64 arrives with nat ==
@@ -3666,16 +3655,30 @@ static const Value *entry_arg(Machine *m, const char *text, uint64_t bound) {
   return NULL;
 }
 
+/* A number prints in decimal; a Text, a big Nat and a canonical value
+   (inl, some, a constructor) print in the surface syntax (S3 chunk B). */
 static int print_result(Machine *m, const char *name, const Value *v, FILE *out, FILE *err) {
+  static char buf[1u << 16];
   switch (v->kind) {
   case VAL_NAT:
     fprintf(out, "%llu\n", (unsigned long long)v->nat);
     return 0;
+  case VAL_INT64:
+    fprintf(out, "%lld\n", (long long)v->i64);
+    return 0;
   case VAL_TRAP:
     fputs("trap\n", out);
-    fprintf(err, "langc: EVAL_OVERFLOW: %s: a Nat operation overflowed past 2^64-1\n", name);
+    fprintf(err, "langc: EVAL_TRAP: %s: the value is a trap\n", name);
     return 0;
+  case VAL_TEXT:
+  case VAL_BIG:
   case VAL_OP:
+    if (!value_print(m, NULL, 0, v, buf, sizeof buf)) {
+      diag_fail(m->diag, "EVAL_ENTRY", name, "the value is too large to print");
+      return 1;
+    }
+    fprintf(out, "%s\n", buf);
+    return 0;
   case VAL_UNIV:
   case VAL_LAM:
   case VAL_PI:
@@ -3687,12 +3690,9 @@ static int print_result(Machine *m, const char *name, const Value *v, FILE *out,
   case VAL_PATHP:
   case VAL_IVAL:
   case VAL_PAPP:
-  case VAL_TEXT:
-  case VAL_INT64:
-  case VAL_BIG:
     break;
   }
-  diag_fail(m->diag, "EVAL_ENTRY", name, "the entry did not compute a number");
+  diag_fail(m->diag, "EVAL_ENTRY", name, "the entry did not compute a value that prints");
   return 1;
 }
 
@@ -3715,6 +3715,8 @@ int eval_command(Machine *m, const char *name, char *const *args, int arg_count,
     return 2;
   }
   if (!entry_of(m, m->defs[d].type, &entry)) {
+    if (v->kind == VAL_INT64)
+      return print_result(m, name, v, out, err);
     buf = arena_alloc(m->arena, PRINT_MAX);
     if (buf == NULL)
       return diag_fail(m->diag, "OOM", name, "out of memory") + 1;

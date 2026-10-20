@@ -7,11 +7,91 @@
 
 static int cases_run = 0;
 
+/* Exercise append with an exact-size input, so sanitizers can detect reads
+   beyond the first string even when its final contents would be correct. */
+static int append_bounds(void) {
+  Arena arena;
+  Machine m;
+  Diag diag;
+  const Value *append;
+  const Value *v;
+  char first[2] = "a";
+  const char second[] = "012345678901234567890123456789";
+  DeclList decls;
+  const char *source = "def append : Text -> Text -> Text := fun (a : Text) (b : Text) => textAppend a b\n";
+  int ok;
+  cases_run++;
+  arena_init(&arena, (size_t)128 << 20);
+  diag_init(&diag);
+  ok = front_load(&arena, "append-bounds", source, strlen(source), &decls, &diag)
+    && check_program(&arena, &decls, &m, &diag);
+  append = ok ? def_value(&m, m.def_count - 1u) : NULL;
+  v = append == NULL ? NULL : apply_value(&m, apply_value(&m, append, val_text(&m, first, 1u)), val_text(&m, second, sizeof second - 1u));
+  ok = v != NULL && v->kind == VAL_TEXT && v->nat == sizeof second
+    && v->name[0] == 'a' && memcmp(v->name + 1, second, sizeof second) == 0;
+  if (!ok) fprintf(stderr, "FAIL append reads only the input lengths\n");
+  arena_release(&arena);
+  return ok;
+}
+
+/* Replacement domains must have the field types that jsonParse constructs. */
+static int json_domain_shape(const char *text_type, const char *number_type, const char *bool_type, const char *extra, const char *code) {
+  Arena arena;
+  Machine m;
+  Diag diag;
+  DeclList decls = {0};
+  TokenList tokens;
+  char domain[1024];
+  const char *source = "def r : Sum Text Json := jsonParse \"\\\"x\\\"\"\n";
+  int ok;
+  cases_run++;
+  snprintf(domain, sizeof domain,
+    "family Json := jnull | jbool (jboolValue : %s) | jnum (jnumValue : %s) | jstr (jstrValue : %s) | jarr (jarrItems : JsonList) | jobj (jobjFields : JsonFields) %s\n"
+    "and JsonList := jlNil | jlCons (jlHead : Json) (jlTail : JsonList)\n"
+    "and JsonFields := jfNil | jfCons (jfKey : Text) (jfValue : Json) (jfTail : JsonFields)\n",
+    bool_type, number_type, text_type, extra);
+  arena_init(&arena, (size_t)128 << 20);
+  diag_init(&diag);
+  ok = lex_source(&arena, "json-domain", domain, strlen(domain), &tokens, &diag)
+    && parse_source(&arena, "json-domain", ORIGIN_DOMAIN, &tokens, &decls, &diag)
+    && lex_source(&arena, "json-program", source, strlen(source), &tokens, &diag)
+    && parse_source(&arena, "json-program", ORIGIN_PROGRAM, &tokens, &decls, &diag)
+    && check_program(&arena, &decls, &m, &diag);
+  ok = code == NULL ? ok : !ok && diag.set && strcmp(diag.code, code) == 0;
+  if (!ok) {
+    fprintf(stderr, "FAIL Json schema: Text=%s, number=%s, Bool=%s, extra=%s\n", text_type, number_type, bool_type, extra);
+    diag_print(&diag, stderr);
+  }
+  arena_release(&arena);
+  return ok;
+}
+
 static int checked(Arena *arena, Machine *m, Diag *diag, const char *source) {
   DeclList decls;
   diag_init(diag);
   return front_load(arena, "path-regression", source, strlen(source), &decls, diag)
       && check_program(arena, &decls, m, diag);
+}
+
+static int big_fold_fuel(void) {
+  Arena arena;
+  Machine m;
+  Diag diag;
+  int ok;
+  cases_run++;
+  arena_init(&arena, (size_t)128 << 20);
+  ok = checked(&arena, &m, &diag,
+    "def r : Nat := fold (fun (acc : Nat) => acc) 0 18446744073709551616\n");
+  if (ok) {
+    m.fuel = 20u;
+    ok = def_value(&m, m.def_count - 1u) == NULL && diag.set && strcmp(diag.code, "EVAL_FUEL") == 0;
+  }
+  if (!ok) {
+    fprintf(stderr, "FAIL a big Nat fold uses the evaluation fuel\n");
+    diag_print(&diag, stderr);
+  }
+  arena_release(&arena);
+  return ok;
 }
 
 static int accepts(const char *label, const char *source) {
@@ -717,6 +797,63 @@ int main(void) {
     "(fold Nat (Fin 2) 0 (fun (u : Fin 2) => 1) (fun (n : Nat) => 0) (fun (i : I) => 0) o) := "
     "fun (o : Odd) => fun (j : I) => fold Nat (Fin 2) 0 (fun (u : Fin 2) => 1) (fun (n : Nat) => 0) (fun (i : I) => 0) "
     "(hcomp Odd (~j \\/ j) (fun (i : I) => [ ~j -> o, j -> o ]) o)\n");
+  /* S3 chunk B: a path at each base type. A Text with a zero byte prints
+     with \x00 and reads back; an Int64 sum and a big Nat sum normalize;
+     a JSON render then parse is the tree. */
+  failed += !roundtrip("a Text path with a zero byte", "def t : Path Text \"a\\x00b\" \"a\\x00b\" := refl\n");
+  failed += !roundtrip("an Int64 sum", "def q : Int64 := int64Add 2 3\n");
+  failed += !roundtrip("a big Nat sum is the literal 2^64",
+    "def r : Path Nat (natAdd 18446744073709551615 1) 18446744073709551616 := refl\n");
+  failed += !accepts("a JSON render then parse gives the tree",
+    "def j : Path (Sum Text Json) (jsonParse (jsonRender (jarr (jlCons (jnum (inl 1)) jlNil)))) "
+    "(inr (jarr (jlCons (jnum (inl 1)) jlNil))) := refl\n");
+  failed += !roundtrip("a negative Int64 prints as source",
+    "def r : Int64 := int64Neg 5\n");
+  failed += !roundtrip("the minimum Int64 prints as source",
+    "def r : Int64 := int64Add 9223372036854775807 1\n");
+  failed += !roundtrip("negative Int64 path endpoints print as source",
+    "def r : Path Int64 (int64Neg 5) (int64Sub 0 5) := refl\n");
+  failed += !roundtrip("negative Int64 constructor fields print as source",
+    "def r : Option Int64 := int64Rem (int64Neg 7) 2\n");
+  failed += !append_bounds();
+  failed += !accepts("JSON refuses a leading zero",
+    "def r : Path (Sum Text Json) (jsonParse \"01\") (inl \"byte 1: a number has a leading zero\") := refl\n");
+  failed += !accepts("JSON refuses a negative leading zero",
+    "def r : Path (Sum Text Json) (jsonParse \"[-01]\") (inl \"byte 3: a number has a leading zero\") := refl\n");
+  failed += !accepts("JSON accepts zero before a fraction or exponent",
+    "def r : Path (Sum Text Json) (jsonParse \"[0.1,-0e2]\") "
+    "(inr (jarr (jlCons (jnum (inr \"0.1\")) (jlCons (jnum (inr \"-0e2\")) jlNil)))) := refl\n");
+  failed += !roundtrip("decEqNat at equal big Nats",
+    "def r : Sum (Path Nat 18446744073709551616 18446744073709551616) "
+    "(Path Nat 18446744073709551616 18446744073709551616 -> Empty) := decEqNat 18446744073709551616 18446744073709551616\n");
+  failed += !roundtrip("decEqNat at different big Nats of the same width",
+    "def r : Sum (Path Nat 18446744073709551616 18446744073709551617) "
+    "(Path Nat 18446744073709551616 18446744073709551617 -> Empty) := decEqNat 18446744073709551616 18446744073709551617\n");
+  failed += !roundtrip("decEqNat at a big Nat and a word with the same limb count",
+    "def r : Sum (Path Nat 18446744073709551616 3) "
+    "(Path Nat 18446744073709551616 3 -> Empty) := decEqNat 18446744073709551616 3\n");
+  failed += !roundtrip("an unfold with a big bound can terminate immediately",
+    "def r : List Nat := unfold (fun (s : Nat) => none) (natAdd 18446744073709551615 1) 0\n");
+  failed += !roundtrip("a neutral unfold retains its big bound",
+    "def r : (Nat -> Option (Prod Nat Nat)) -> List Nat := fun (step : Nat -> Option (Prod Nat Nat)) => "
+    "unfold step 18446744073709551616 0\n");
+  failed += !accepts("a partially evaluated unfold decrements its big bound",
+    "def r : (step : Nat -> Option (Prod Nat Nat)) -> Path (List Nat) "
+    "(unfold (fun (s : Nat) => finCase 2 (natEq s 0) (step s) (some (pair 7 1))) 18446744073709551616 0) "
+    "(cons 7 (unfold (fun (s : Nat) => finCase 2 (natEq s 0) (step s) (some (pair 7 1))) 18446744073709551615 1)) "
+    ":= fun (step : Nat -> Option (Prod Nat Nat)) => refl\n");
+  failed += !big_fold_fuel();
+  failed += !accepts("big arithmetic carries and borrows through every limb",
+    "def a : Path Nat (succ 79228162514264337593543950335) 79228162514264337593543950336 := refl\n"
+    "def b : Path Nat (natSub 79228162514264337593543950336 1) 79228162514264337593543950335 := refl\n"
+    "def c : Path Nat (natMul 18446744073709551616 18446744073709551616) 340282366920938463463374607431768211456 := refl\n"
+    "def d : Path Nat (natSub 18446744073709551616 1) 18446744073709551615 := refl\n"
+    "def e : Path Nat (natMul 18446744073709551616 0) 0 := refl\n");
+  failed += !json_domain_shape("Text", "Sum Int64 Text", "Fin 2", "", NULL);
+  failed += !json_domain_shape("Empty", "Sum Int64 Text", "Fin 2", "", "JSON_FAMILY");
+  failed += !json_domain_shape("Text", "Text", "Fin 2", "", "JSON_FAMILY");
+  failed += !json_domain_shape("Text", "Sum Int64 Text", "Nat", "", "JSON_FAMILY");
+  failed += !json_domain_shape("Text", "Sum Int64 Text", "Fin 2", "| jextra", "JSON_FAMILY");
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

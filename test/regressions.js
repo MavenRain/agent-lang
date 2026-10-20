@@ -58,7 +58,7 @@ function domainCompiler(text) {
     assert.equal(r.status, 0, r.stdout + r.stderr);
   }
   tcc(['-run', 'gen/embed.c', domain, embedded]);
-  const front = ['base', 'lexer', 'parser', 'front', 'eval', 'check'].map(n => `src/front/${n}.c`);
+  const front = ['base', 'lexer', 'parser', 'front', 'eval', 'check', 'big', 'jsontext'].map(n => `src/front/${n}.c`);
   tcc(['-std=c99', '-Wall', '-Werror', '-Isrc', '-o', exe, 'src/main.c', ...front, 'src/json.c', embedded]);
   return exe;
 }

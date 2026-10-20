@@ -85,7 +85,7 @@ example `Lot 3`), not in `value`.
 | `JSON_VALUE` | An instance holds a function, a type or a stuck term |
 | `JSON_DEPTH` | An instance nests deeper than 2000 levels. A list spine does not count. |
 | `JSON_TYPE` | The complete instance type exceeds the printer's size or depth limit |
-| `EVAL_OVERFLOW` | A Nat operation in an instance overflows |
+| `EVAL_TRAP` | An instance value is a trap (no S3 operation makes one: Nat arithmetic is unbounded) |
 
 The check and evaluation codes are the same as in `langc check` and
 `langc eval`. `test/parse`, `test/check` and `test/emit` hold a program
@@ -110,7 +110,7 @@ executable at build time. `domain/README.md` tells how to replace it.
 | Evaluator depth | 2000 | `src/front/core.h:16` |
 | Evaluator fuel, for each instance | 20,000,000 steps | `src/front/core.h:17` |
 | JSON nesting | 2000 | `src/json.h:15` |
-| `type` text | 4096 bytes | `src/json.c:7` |
+| `type` text | 4096 bytes | `src/json.c:9` |
 | Type and normal-form printer depth | 200 | `src/front/eval.c` |
 
 ## Origin
