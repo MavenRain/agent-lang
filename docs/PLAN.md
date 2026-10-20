@@ -86,6 +86,28 @@ family with `logEmpty` and `logAppend`;  `logFold` is `fold`;  `logLength`
 is a def.  Q9: the Nat overflow trap goes;  the fuel trap stays.  The
 slice order of section 8 does not change.
 
+### USER ruling (S4)
+
+The USER gave this ruling on 2026-10-20, after the S4 kickoff (the kickoff
+record, outside the repo, section 2):
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a Q10=a
+
+Each letter is the proposal (a) of the kickoff.  Q1: a layer family with
+one more parameter `X : Type 0`, then `cofamily C ps := F ps` in the domain
+(rule R1).  Q2: a layer field does not use X, is X, or is a Pi chain with
+the codomain X;  the layer is uniform, has point constructors only and is
+a block of one.  Q3: coiteration only, `unfold g s : C ps` with
+`g : S -> F ps S`;  the type is the guard;  R3 stays.  Q4: `unfold g s` is
+a value;  `out` applies g once and spends 1 fuel;  no cache.  Q5: two
+coinductive values convert when the steps and the seeds convert;  no eta;
+no path from a bisimulation (open item O21).  Q6: transp along a constant
+line is the identity, else neutral;  hcomp is formal.  Q7: a cofamily is
+not an instance type;  a cofamily value inside an instance is JSON_VALUE.
+Q8: the kit `List` unfold stays;  the hint selects the rule.  Q9: the new
+codes CODATA_FORM, CODATA_POSITIVE and CODATA_FOLD.  Q10: Stream, Colist
+and Mealy in the domain.  The slice order of section 8 does not change.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |

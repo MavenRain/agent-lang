@@ -84,6 +84,7 @@ typedef enum {
   RULE_FOLD,
   RULE_ELIM,
   RULE_UNFOLD,
+  RULE_OUT,
   RULE_SYM,
   RULE_CONG,
   RULE_FUNEXT,
@@ -191,7 +192,8 @@ static const Builtin BUILTINS[] = {
   {"natToInt64", 1, RULE_INT64, OP_NAT_TO_INT64, OP_OPTION, 0},
   {"jsonParse", 1, RULE_JSON, OP_JSON_PARSE, OP_SUM, 0},
   {"jsonRender", 1, RULE_JSON, OP_JSON_RENDER, OP_TEXT, 0},
-  {"absurd", 2, RULE_ABSURD, OP_ABSURD, OP_NAT, 0}
+  {"absurd", 2, RULE_ABSURD, OP_ABSURD, OP_NAT, 0},
+  {"out", 1, RULE_OUT, OP_OUT, OP_NAT, 0}
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof BUILTINS / sizeof BUILTINS[0]))
@@ -1193,6 +1195,8 @@ static const Core *fold_family(Call *k, const Core *s, const Value *st) {
   const Value *res = k->hint;
   const Core **cores = arena_alloc(m->arena, ((size_t)f->ctor_count + 2u) * sizeof *cores);
   uint32_t j;
+  if (f->cofamily)
+    return nul(FAIL(c, "CODATA_FOLD", "fold needs an inductive family; %s is a coinductive family (S4), use out", f->name));
   if (cores == NULL)
     return nul(FAIL(c, "OOM", "out of memory"));
   const Value *ct;
@@ -1237,6 +1241,8 @@ static const Core *elim_on_family(Call *k, const Core *motive, const Value *pt, 
   const Core *s;
   uint32_t j;
   int ok;
+  if (f->cofamily)
+    return nul(FAIL(c, "CODATA_FOLD", "elim needs an inductive family; %s is a coinductive family (S4), use out", f->name));
   if (in_block(c, st->inst))
     return nul(FAIL(c, "HIT_BOUNDARY", "a constructor cannot eliminate %s before all of its constructors are checked", f->name));
   if (cores == NULL)
@@ -1504,6 +1510,10 @@ static const Core *rule_fold(Call *k) {
   const Core *s = try_infer(c, k->args[k->argc - 1u], &st);
   uint32_t fam = val_is(st, OP_FAMILY) ? st->inst : NO_FAMILY;
   if (s != NULL && fam != NO_FAMILY) {
+    /* A cofamily has no constructors: fold_family refuses it at each
+       number of arguments (S4 Q9). */
+    if (c->m->families[fam].cofamily)
+      return fold_family(k, s, st);
     /* The constructor slots of a block are reserved before its
        constructors are checked (S6), so the test is the block. */
     if (in_block(c, fam))
@@ -1530,7 +1540,66 @@ static const Core *rule_fold(Call *k) {
   return s == NULL ? NULL : nul(FAIL(c, "TYPE_MISMATCH", "fold needs a last argument of type Nat, List A or a domain family, and one case for each constructor; found %u arguments and a last argument of type %s", k->argc, show(c, st)));
 }
 
-/* unfold g limit seed, with g : S -> Option (Prod A S). */
+/* A cofamily type C ps (S4). */
+static int is_cofamily(const Machine *m, const Value *v) {
+  return val_is(v, OP_FAMILY) && m->families[v->inst].cofamily;
+}
+
+/* The layer type F ps X of the cofamily type CV = C ps (S4 Q1). */
+static const Value *layer_type(Checker *c, const Value *cv, const Value *x) {
+  const FamilyInfo *f = &c->m->families[cv->inst];
+  const Value **args = arena_alloc(c->m->arena, ((size_t)f->param_count + 1u) * sizeof *args);
+  uint32_t i;
+  if (args == NULL) {
+    (void)FAIL(c, "OOM", "out of memory");
+    return NULL;
+  }
+  for (i = 0; i < f->param_count; i++)
+    args[i] = cv->args[i];
+  args[f->param_count] = x;
+  return val_op(c->m, VAL_OP, OP_FAMILY, f->layer, 0, args, f->param_count + 1u);
+}
+
+/* unfold g s at a cofamily C ps (S4 Q3), with g : S -> F ps S and S the
+   type of the seed s. The type is the guard: g gives one layer for each
+   step. */
+static const Core *rule_counfold(Call *k) {
+  Checker *c = k->c;
+  const Value *st = NULL;
+  const Value *layer;
+  const Core *seed;
+  const Core *g;
+  Core *out;
+  if (!is_cofamily(c->m, k->hint))
+    return need_type(k, "C ps of a cofamily C");
+  seed = infer(c, k->args[1], &st);
+  layer = seed == NULL ? NULL : layer_type(c, k->hint, st);
+  g = layer == NULL ? NULL : check(c, k->args[0], val_arrow(c->m, st, layer));
+  k->type = k->hint;
+  out = g == NULL ? NULL : (Core *)op3(c, OP_COUNFOLD, k->hint->inst, 2, g, seed, NULL);
+  if (out == NULL)
+    return NULL;
+  /* Retain the result and seed types for source printing after evaluation. */
+  out->a = quote_value(c->m, c->level, k->hint);
+  out->b = quote_value(c->m, c->level, st);
+  return out->a == NULL || out->b == NULL ? NULL : out;
+}
+
+/* out x : F ps (C ps), with x : C ps (S4 Q4). */
+static const Core *rule_out(Call *k) {
+  Checker *c = k->c;
+  const Value *st = NULL;
+  const Core *x = infer(c, k->args[0], &st);
+  if (x == NULL)
+    return NULL;
+  if (!is_cofamily(c->m, st))
+    return nul(FAIL(c, "TYPE_MISMATCH", "out needs a value of a coinductive family, found a term of type %s", show(c, st)));
+  k->type = layer_type(c, st, st);
+  return k->type == NULL ? NULL : op3(c, OP_OUT, st->inst, 1, x, NULL, NULL);
+}
+
+/* unfold g limit seed, with g : S -> Option (Prod A S). The cofamily form
+   takes 2 arguments (S4 Q8). */
 static const Core *rule_unfold(Call *k) {
   Checker *c = k->c;
   const Value *st = NULL;
@@ -1538,6 +1607,8 @@ static const Core *rule_unfold(Call *k) {
   const Core *seed;
   const Core *limit;
   const Core *g;
+  if (k->used == 2u)
+    return rule_counfold(k);
   if (!val_is(k->hint, OP_LIST))
     return need_type(k, "List A");
   a = k->hint->args[0];
@@ -2410,6 +2481,8 @@ static const Core *rule(Call *k) {
     return rule_elim(k);
   case RULE_UNFOLD:
     return rule_unfold(k);
+  case RULE_OUT:
+    return rule_out(k);
   case RULE_SYM:
     return rule_sym(k);
   case RULE_CONG:
@@ -2743,6 +2816,10 @@ static const Core *apply_known(Checker *c, const Term *whole, const Head *h, con
     if (val_is(dom, OP_FAMILY))
       arity = c->m->families[dom->inst].ctor_count + 2u;
   }
+  /* unfold at a cofamily hint, or with no hint, takes 2 arguments (S4 Q8);
+     the kit form at a List hint keeps 3. */
+  if (h->kind == HEAD_BUILTIN && h->builtin->rule == RULE_UNFOLD && argc == 2u && (hint == NULL || is_cofamily(c->m, hint)))
+    arity = 2u;
   if (argc < arity && hint != NULL && hint->kind == VAL_PI)
     return eta(c, whole, hint, type);
   if (argc < arity)
@@ -3455,6 +3532,8 @@ static int check_header(Checker *c, const Decl *d, uint32_t fam, uint32_t first,
   f->first_ctor = m->ctor_count;
   f->ctor_count = (uint32_t)d->ctor_count;
   f->universe = universe;
+  f->cofamily = 0;
+  f->layer = 0;
   for (i = 0; i < d->ctor_count; i++) {
     memset(&m->ctors[m->ctor_count + i], 0, sizeof m->ctors[0]);
     m->ctors[m->ctor_count + i].family = fam;
@@ -3526,6 +3605,83 @@ static int check_family(Checker *c, const Decl *d) {
   return 1;
 }
 
+/* T uses the variable at the de Bruijn index IX. */
+static int core_uses(const Core *t, uint32_t ix) {
+  uint32_t i;
+  int under;
+  if (t == NULL)
+    return 0;
+  if (t->kind == CORE_VAR)
+    return t->index == ix;
+  under = t->kind == CORE_LAM || t->kind == CORE_PI || t->kind == CORE_SIGMA || t->kind == CORE_PLAM || t->kind == CORE_PATHP;
+  if (core_uses(t->a, ix) || core_uses(t->b, under ? ix + 1u : ix))
+    return 1;
+  for (i = 0; i < t->argc; i++)
+    if (core_uses(t->args[i], ix))
+      return 1;
+  return 0;
+}
+
+/* A layer field (S4 Q2) does not use the carrier X, is X, or is a Pi chain
+   with the codomain X and no X in a domain. X is the index IX in the
+   context of the field. */
+static int codata_positive(const Core *t, uint32_t ix) {
+  for (; t->kind == CORE_PI; t = t->b, ix++)
+    if (core_uses(t->a, ix))
+      return 0;
+  return (t->kind == CORE_VAR && t->index == ix) || !core_uses(t, ix);
+}
+
+/* `cofamily C ps := F ps` (S4 Q1, Q2). F is a domain family with one more
+   parameter, the carrier X : Type 0. F is uniform, has point constructors
+   only and is a block of one (CODATA_FORM). Each field of F does not use
+   X, is X, or is a Pi chain with the codomain X (CODATA_POSITIVE). */
+static int check_cofamily(Checker *c, const Decl *d) {
+  Machine *m = c->m;
+  uint32_t fam = m->family_count;
+  uint32_t p = (uint32_t)d->param_count;
+  uint32_t layer = fam;
+  uint32_t n = 0;
+  uint32_t i;
+  uint32_t j;
+  const Term *t = d->body;
+  const FamilyInfo *l;
+  const Core *x;
+  if (!check_header(c, d, fam, fam, 1u, 0u))
+    return 0;
+  for (; t->kind == TERM_APP; t = t->left, n++) {
+    const Scope *s = t->right->kind == TERM_VAR ? find_local(c, t->right->name) : NULL;
+    if (n >= p || s == NULL || s->level != p - 1u - n)
+      return FAIL(c, "CODATA_FORM", "the body of %s must be a domain family at the parameters of %s, in order", d->name, d->name);
+  }
+  for (i = 0; t->kind == TERM_VAR && find_local(c, t->name) == NULL && i < fam; i++)
+    if (strcmp(m->families[i].name, t->name) == 0 && !m->families[i].cofamily)
+      layer = i;
+  if (n != p || layer == fam)
+    return FAIL(c, "CODATA_FORM", "the body of %s must be a domain family at the parameters of %s, in order", d->name, d->name);
+  l = &m->families[layer];
+  x = l->param_count == p + 1u ? l->param_types[p] : NULL;
+  if (x == NULL || x->kind != CORE_UNIV || x->nat != 0u || l->universe != 0u || l->index_count != 0u || l->block_count != 1u)
+    return FAIL(c, "CODATA_FORM", "the layer %s of %s must be a uniform family in Type 0 outside a block, with one more parameter X : Type 0", l->name, d->name);
+  /* Both parameter types are in the context of the earlier parameters, at
+     the same positions; one environment evaluates the two the same way. */
+  for (i = 0; i < p; i++)
+    if (!conv_values(m, c->level, here(c, l->param_types[i]), here(c, m->families[fam].param_types[i])))
+      return FAIL(c, "CODATA_FORM", "the parameter %u of the layer %s does not have the type of the parameter %s of %s", i + 1u, l->name, d->params[i].name, d->name);
+  for (i = 0; i < l->ctor_count; i++) {
+    const CtorInfo *ci = &m->ctors[l->first_ctor + i];
+    if (ci->interval_count != 0u)
+      return FAIL(c, "CODATA_FORM", "the layer %s of %s has the path constructor %s; a layer has point constructors only", l->name, d->name, ci->name);
+    for (j = 0; j < ci->field_count; j++)
+      if (!codata_positive(ci->fields[j].type, j))
+        return FAIL(c, "CODATA_POSITIVE", "the field %s of %s uses the carrier X of %s in a position that is not positive; a field does not use X, is X, or is a Pi chain with the codomain X", ci->fields[j].name, ci->name, l->name);
+  }
+  m->families[fam].cofamily = 1;
+  m->families[fam].layer = layer;
+  m->families[fam].universe = l->universe;
+  return 1;
+}
+
 static int check_def(Checker *c, const Decl *d) {
   Machine *m = c->m;
   uint64_t level = 0;
@@ -3547,6 +3703,8 @@ static int check_def(Checker *c, const Decl *d) {
 static int check_decl(Checker *c, const Decl *d) {
   if (d->kind == DECL_FAMILY && d->origin == ORIGIN_PROGRAM)
     return FAIL(c, "REFUSE_DATA", "a program cannot declare a family (rule R1); only domain/domain.lang can");
+  if (d->kind == DECL_COFAMILY && d->origin == ORIGIN_PROGRAM)
+    return FAIL(c, "REFUSE_DATA", "a program cannot declare a cofamily (rule R1); only domain/domain.lang can");
   if (d->kind == DECL_AXIOM)
     return FAIL(c, "REFUSE_AXIOM", "an axiom has no proof (rule R2)");
   if (d->is_rec)
@@ -3555,6 +3713,8 @@ static int check_decl(Checker *c, const Decl *d) {
     return FAIL(c, "REFUSE_NAME", "%s is a reserved name (rule R4)", d->name);
   if (!name_free(c, d->name))
     return 0;
+  if (d->kind == DECL_COFAMILY)
+    return check_cofamily(c, d);
   return d->kind == DECL_FAMILY ? check_family(c, d) : check_def(c, d);
 }
 

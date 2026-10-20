@@ -70,3 +70,9 @@ text-slice-arity.lang TYPE_ARITY
 int64-literal-range.lang TYPE_MISMATCH
 json-entry-type.lang TYPE_MISMATCH
 log-entry-type.lang TYPE_MISMATCH
+codata-program.lang REFUSE_DATA
+codata-step.lang TYPE_MISMATCH
+codata-out.lang TYPE_MISMATCH
+codata-fold.lang CODATA_FOLD
+codata-elim.lang CODATA_FOLD
+codata-bisim.lang PATH_END

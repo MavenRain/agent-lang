@@ -11,3 +11,4 @@ dangling-at.lang PARSE_EXPECT
 system-top.lang PARSE_EXPECT
 text-unterminated.lang LEX_STR_OPEN
 text-escape.lang LEX_STR_ESCAPE
+cofamily-no-body.lang PARSE_EXPECT

@@ -881,6 +881,67 @@ int main(void) {
     "(logAppend (logAppend logEmpty jnull) (jbool true))) (logLength (logAppend (logAppend logEmpty jnull) (jbool true))) := refl\n"
     "def t : Path Nat (elim (fun (l : Log) => Nat) 0 (fun (rest : Log) (ih : Nat) (entry : Json) => succ ih) "
     "(logAppend (logAppend logEmpty jnull) (jbool true))) 2 := refl\n");
+  /* S4 chunk A: the cofamilies. A refused layer is extra domain text, not
+     a change to domain/domain.lang. */
+  failed += !domain_refuses("cofamily: the body is not a domain family",
+    "cofamily Pairs (A : Type 0) := Prod A\n", "", "CODATA_FORM");
+  failed += !domain_refuses("cofamily: an indexed layer",
+    "family IxF (A : Type 0) (X : Type 0) : Nat -> Type 0 := ixz : IxF A X 0\n"
+    "cofamily Ix (A : Type 0) := IxF A\n", "", "CODATA_FORM");
+  failed += !domain_refuses("cofamily: a layer with a path constructor",
+    "family CircF (A : Type 0) (X : Type 0) := cbase | cloop (i : I) [ ~i -> cbase A X, i -> cbase A X ]\n"
+    "cofamily Circ (A : Type 0) := CircF A\n", "", "CODATA_FORM");
+  failed += !domain_refuses("cofamily: X in the domain of a Pi field",
+    "family BackF (A : Type 0) (X : Type 0) := back (backRead : X -> A)\n"
+    "cofamily Back (A : Type 0) := BackF A\n", "", "CODATA_POSITIVE");
+  failed += !domain_refuses("cofamily: X under List",
+    "family RoseF (A : Type 0) (X : Type 0) := rose (roseLabel : A) (roseKids : List X)\n"
+    "cofamily Rose (A : Type 0) := RoseF A\n", "", "CODATA_POSITIVE");
+  failed += !domain_accepts("cofamily: a Pi chain field, the Mealy shape",
+    "family PairInF (I0 : Type 0) (X : Type 0) := pairIn (pairInNext : I0 -> I0 -> X)\n"
+    "cofamily PairIn (I0 : Type 0) := PairInF I0\n",
+    "def sum : PairIn Nat := unfold (fun (s : Nat) => pairIn Nat Nat (fun (a : Nat) (b : Nat) => natAdd s (natAdd a b))) 0\n"
+    "def counter : Mealy Nat Nat := unfold (fun (s : Nat) => mealy Nat Nat Nat s (fun (i : Nat) => natAdd s i)) 0\n");
+  failed += !accepts("out gives one layer F ps (C ps)",
+    "def nats : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
+    "def layer : StreamF Nat (Stream Nat) := out nats\n"
+    "def step : Stream Nat -> StreamF Nat (Stream Nat) := fun (x : Stream Nat) => out x\n");
+  failed += !roundtrip("the unfold of a cofamily prints and checks again",
+    "def r : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n");
+  failed += !domain_refuses("cofamily: a layer above Type 0",
+    "family LargeF (X : Type 0) := largeF (largeType : Type 0) (largeNext : X)\n"
+    "cofamily Large := LargeF\n", "", "CODATA_FORM");
+  failed += !domain_refuses("cofamily: a parameter shadows the layer name",
+    "family ShadowF (A : Type 0) (X : Type 0) := shadowF (shadowNext : X)\n"
+    "cofamily Shadow (ShadowF : Type 0) := ShadowF ShadowF\n", "", "CODATA_FORM");
+  failed += !domain_refuses("cofamily: shadowed parameters are not in order",
+    "family DupF (A : Type 0) (B : Type 0) (X : Type 0) := dupF (dupNext : X)\n"
+    "cofamily Dup (A : Type 0) (A : Type 0) := DupF A A\n", "", "CODATA_FORM");
+  failed += !roundtrip("out of a canonical unfold round trips",
+    "def nats : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
+    "def layer : StreamF Nat (Stream Nat) := out nats\n");
+  failed += !roundtrip("coiteration with an Option seed round trips",
+    "def seed : Option Nat := none\n"
+    "def nats : Stream Nat := unfold (fun (s : Option Nat) => scons Nat (Option Nat) 0 s) seed\n");
+  failed += !roundtrip("coiteration with a function seed round trips",
+    "def seed : Nat -> Nat := fun (n : Nat) => n\n"
+    "def nats : Stream Nat := unfold (fun (s : Nat -> Nat) => scons Nat (Nat -> Nat) (s 0) s) seed\n");
+  failed += !domain_accepts("cofamily: dependent parameters keep their order",
+    "family DepF (A : Type 0) (a : A) (X : Type 0) := depF (depNext : X)\n"
+    "cofamily Dep (A : Type 0) (a : A) := DepF A a\n",
+    "def value : Dep Nat 0 := unfold (fun (n : Nat) => depF Nat 0 Nat (succ n)) 0\n"
+    "def layer : DepF Nat 0 (Dep Nat 0) := out value\n");
+  failed += !roundtrip("coiteration types under binders use fresh names",
+    "def make : (A : Type 0) -> Option A -> Stream Nat := "
+    "fun (A : Type 0) (_case0 : Option A) => unfold "
+    "(fun (s : Option A) => scons Nat (Option A) 0 s) _case0\n");
+  failed += !roundtrip("coiteration in path endpoints retains its types",
+    "def seed : Option Nat := none\n"
+    "def nats : Stream Nat := unfold (fun (s : Option Nat) => scons Nat (Option Nat) 0 s) seed\n"
+    "def same : Path (Stream Nat) nats nats := refl\n");
+  failed += !roundtrip("coiteration with a cofamily seed round trips",
+    "def seed : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
+    "def nats : Stream Nat := unfold (fun (s : Stream Nat) => scons Nat (Stream Nat) 0 s) seed\n");
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

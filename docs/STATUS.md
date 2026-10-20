@@ -593,3 +593,58 @@ Deviations:
 - (j) `json.lang` `minNumber` prints `inr (jnum (inl (int64Add
   9223372036854775807 1)))`: the chunk B review prints a negative Int64
   as source.
+
+## S4: coinductive families (2026-10-20)
+
+### Chunk A: grammar, core and check
+
+Chunk A adds the keyword `cofamily` (`TOK_KW_COFAMILY`, `DECL_COFAMILY`),
+the check of a cofamily declaration, and the check rules of `unfold` at a
+cofamily and of `out` (USER rulings Q1 to Q10, all (a)). `cofamily C ps :=
+F ps` declares the greatest fixed point of the layer family F at its last
+parameter X. `check_cofamily` refuses a body that is not a domain family
+at the parameters of C in order, and a layer that has an index, is in a
+block, is above `Type 0`, has no carrier `X : Type 0`, has a different
+parameter type or has a path constructor (`CODATA_FORM`). The body resolves
+the layer and parameter names in their local scope, so shadowing cannot
+change the layer or repeat an earlier parameter. It refuses a field that uses X in a
+position that is not positive (`CODATA_POSITIVE`): a field does not use X,
+is X, or is a Pi chain with the codomain X and no X in a domain. A program
+cannot declare a cofamily (`REFUSE_DATA`). `FamilyInfo` records the
+cofamily flag and the layer. `unfold g s` at a cofamily hint takes 2
+arguments (`OP_COUNFOLD`, `g : S -> F ps S`, S the type of the seed);
+without a hint it needs a type (Q8). The kit `unfold` at a `List` hint
+keeps 3 arguments. `out x : F ps (C ps)` for `x : C ps` (`OP_OUT`). `fold`
+and `elim` refuse a cofamily first (`CODATA_FOLD`). The domain adds
+`StreamF` and `Stream`, `ColistF` and `Colist`, `MealyF` and `Mealy` (Q10).
+The eval is chunk B: `reduce_op` keeps `unfold g s` as a canonical value
+and returns a `VAL_STUCK` for each `out`. json.c puts both operations with
+the other canonical values; the `JSON_VALUE` refusal is chunk B.
+Coiteration retains its result and seed types through evaluation and
+quotation. The printer uses typed identities for seeds and for coiterations
+in inference positions, including the argument of `out`, so these values
+print as source that checks again.
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 28 | 0 |
+| parse refusals | 14 | +1 (`cofamily-no-body.lang PARSE_EXPECT`) |
+| check refusals | 78 | +6 (`codata-program.lang REFUSE_DATA`, `codata-step.lang` and `codata-out.lang TYPE_MISMATCH`, `codata-fold.lang` and `codata-elim.lang CODATA_FOLD`, `codata-bisim.lang PATH_END`) |
+| evals | 127 | 0 |
+| json goldens | 28 | 0 |
+| build refusals | 3 | 0 |
+| regressions | 6 | 0 |
+| printer regressions | 2 | 0 |
+| path regressions | 165 | +18 (6 `CODATA_FORM` and 2 `CODATA_POSITIVE` by `domain_refuses`, Pi chain and dependent layers, `Mealy`, the type of `out`, and round trips for coiterations, `out`, seeds, binders and path endpoints) |
+
+Deviations:
+
+- `unfold` at a cofamily is a new operation (`OP_COUNFOLD`: inst is the
+  cofamily, the arguments are g and s), not a new Value kind. `OP_COUNFOLD`
+  and `OP_OUT` are at the end of the `Op` enum, and `out` is the last
+  BUILTINS row.
+- `rule_fold` sends a cofamily to `fold_family` before the arity test of a
+  family fold, thus `fold` refuses a cofamily (`CODATA_FOLD`) at each
+  number of arguments. `elim` keeps the builtin arity 3 before `rule_elim`:
+  `codata-elim.lang` gives a motive, one case and the stream. An `elim`
+  with 2 arguments at a cofamily stops at `TYPE_ARITY`.

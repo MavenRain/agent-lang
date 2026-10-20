@@ -276,6 +276,8 @@ static int op_json(Out *o, const Value *type, const Value *v) {
   case OP_GLUE:
     return refuse(o, "a Glue element");
   case OP_UNIT_VAL:
+  case OP_COUNFOLD:
+  case OP_OUT:
   case OP_PAIR:
   case OP_INL:
   case OP_INR:

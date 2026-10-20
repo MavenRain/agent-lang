@@ -20,6 +20,7 @@ static const char *const OP_NAMES[] = {
   [OP_SECOND] = "second", [OP_EITHER] = "either", [OP_OPTION_ELIM] = "option",
   [OP_PURE] = "pure", [OP_MAP] = "map", [OP_BIND] = "bind", [OP_FOLD_NAT] = "fold",
   [OP_FOLD_LIST] = "fold", [OP_FOLD_FAMILY] = "fold", [OP_UNFOLD] = "unfold",
+  [OP_COUNFOLD] = "unfold", [OP_OUT] = "out",
   [OP_FILTER] = "filter", [OP_WITNESS] = "witness", [OP_PAYLOAD] = "payload",
   [OP_NAT_ADD] = "natAdd", [OP_NAT_SUB] = "natSub",
   [OP_NAT_MUL] = "natMul", [OP_SUCC] = "succ", [OP_NAT_EQ] = "natEq",
@@ -44,7 +45,7 @@ static const unsigned char OP_ARITY[] = {
   [OP_CONS] = 2, [OP_PACK] = 2, [OP_CTOR] = VARIES, [OP_FIRST] = 1,
   [OP_SECOND] = 1, [OP_EITHER] = 3, [OP_OPTION_ELIM] = 3, [OP_PURE] = 1,
   [OP_MAP] = 2, [OP_BIND] = 2, [OP_FOLD_NAT] = 3, [OP_FOLD_LIST] = 3,
-  [OP_FOLD_FAMILY] = VARIES, [OP_UNFOLD] = 3, [OP_FILTER] = 2, [OP_WITNESS] = 1,
+  [OP_FOLD_FAMILY] = VARIES, [OP_UNFOLD] = 3, [OP_COUNFOLD] = 2, [OP_OUT] = 1, [OP_FILTER] = 2, [OP_WITNESS] = 1,
   [OP_PAYLOAD] = 1,
   [OP_NAT_ADD] = 2, [OP_NAT_SUB] = 2, [OP_NAT_MUL] = 2, [OP_SUCC] = 1,
   [OP_NAT_EQ] = 2, [OP_NAT_LE] = 2, [OP_PROJ] = 1,
@@ -2289,6 +2290,8 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
     return transp_glue(m, line, phi, base);
   case OP_INTERVAL:
   case OP_UNIT_VAL:
+  case OP_COUNFOLD:
+  case OP_OUT:
   case OP_PAIR:
   case OP_INL:
   case OP_INR:
@@ -3265,6 +3268,7 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_INTERVAL:
   case OP_FAMILY:
   case OP_UNIT_VAL:
+  case OP_COUNFOLD:
   case OP_PAIR:
   case OP_INL:
   case OP_INR:
@@ -3274,6 +3278,9 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_CONS:
   case OP_PACK:
     return val_op(m, VAL_OP, op, inst, field, a, n);
+  /* S4 chunk A stub: out is stuck; chunk B adds the step. */
+  case OP_OUT:
+    return val_op(m, VAL_STUCK, op, inst, field, a, n);
   case OP_CTOR:
     return reduce_ctor(m, inst, field, a, n);
   case OP_SYSTEM:
@@ -3395,9 +3402,14 @@ static const Value *eval_op(Machine *m, const Env *env, const Core *c) {
       return args[0]->nat < c->argc - 1u ? eval_core(m, env, c->args[args[0]->nat + 1u]) : internal(m, "a Fin case on a value out of range");
   }
   out = (Value *)reduce_op(m, c->op, c->inst, c->field, args, c->argc);
-  if (out != NULL && out->kind == VAL_STUCK && out->op == OP_FIN_CASE && c->a != NULL) {
+  if (out != NULL && ((out->kind == VAL_STUCK && out->op == OP_FIN_CASE) || val_is(out, OP_COUNFOLD)) && c->a != NULL) {
     out->dom = eval_core(m, env, c->a);
     if (out->dom == NULL)
+      return NULL;
+  }
+  if (out != NULL && val_is(out, OP_COUNFOLD) && c->b != NULL) {
+    out->arg = eval_core(m, env, c->b);
+    if (out->arg == NULL)
       return NULL;
   }
   return out;
@@ -3760,9 +3772,14 @@ static const Core *quote_op(Machine *m, uint32_t level, const Value *v) {
   c->field = v->field;
   c->args = args;
   c->argc = v->argc;
-  if (v->op == OP_FIN_CASE && v->dom != NULL) {
+  if ((v->op == OP_FIN_CASE || v->op == OP_COUNFOLD) && v->dom != NULL) {
     c->a = quote_value(m, level, v->dom);
     if (c->a == NULL)
+      return NULL;
+  }
+  if (v->op == OP_COUNFOLD && v->arg != NULL) {
+    c->b = quote_value(m, level, v->arg);
+    if (c->b == NULL)
       return NULL;
   }
   return c;
@@ -4073,15 +4090,14 @@ static void print_glue(Printer *p, const Value *v, int atom) {
   put(p, atom ? ")" : "");
 }
 
-/* A case in an inference-only position retains its checked result type.
+/* A case or coiteration in an inference-only position retains its type.
    A typed identity supplies the annotation using ordinary source syntax. */
-static int is_typed_case(const Value *v) {
-  return v != NULL && v->kind == VAL_STUCK && v->op == OP_FIN_CASE && v->dom != NULL;
+static int is_typed_value(const Value *v) {
+  return v != NULL && v->dom != NULL && ((v->kind == VAL_STUCK && v->op == OP_FIN_CASE) || val_is(v, OP_COUNFOLD));
 }
 
-static void print_typed_case(Printer *p, const Value *v) {
+static void print_typed(Printer *p, const Value *v, const Value *type) {
   char name[32];
-  Value raw = *v;
   uint32_t suffix = 0;
   do {
     snprintf(name, sizeof name, "_case%u", suffix++);
@@ -4089,13 +4105,25 @@ static void print_typed_case(Printer *p, const Value *v) {
   put(p, "((fun (");
   put(p, name);
   put(p, " : ");
-  print_value(p, v->dom, 0);
+  print_value(p, type, 0);
   put(p, ") => ");
   put(p, name);
-  put(p, ") ");
-  raw.dom = NULL;
-  print_value(p, &raw, 1);
-  put(p, ")");
+  put(p, ") (");
+  print_value(p, v, 0);
+  put(p, "))");
+}
+
+/* The seed of a coiteration must infer even after its definition unfolds. */
+static void print_counfold(Printer *p, const Value *v, int atom) {
+  put(p, atom ? "(" : "");
+  put(p, "unfold ");
+  print_value(p, v->args[0], 1);
+  put(p, " ");
+  if (v->arg != NULL)
+    print_typed(p, v->args[1], v->arg);
+  else
+    print_value(p, v->args[1], 1);
+  put(p, atom ? ")" : "");
 }
 
 /* A Text in double quotes: \" \\ \n \t, and \xHH for every other byte
@@ -4246,7 +4274,7 @@ static void print_value(Printer *p, const Value *v, int atom) {
     return;
   }
   p->depth++;
-  while (is_chain(v) && !p->full && !(atom && is_typed_case(v))) {
+  while (is_chain(v) && !p->full && !val_is(v, OP_COUNFOLD) && !(atom && is_typed_value(v))) {
     uint32_t count = v->argc - 1u;
     if (atom) {
       put(p, "(");
@@ -4279,8 +4307,10 @@ static void print_value(Printer *p, const Value *v, int atom) {
     v = v->args[v->argc - 1u];
     atom = 1;
   }
-  if (atom && is_typed_case(v))
-    print_typed_case(p, v);
+  if (atom && is_typed_value(v))
+    print_typed(p, v, v->dom);
+  else if (val_is(v, OP_COUNFOLD))
+    print_counfold(p, v, atom);
   else
     print_other(p, v, atom);
   for (i = 0; i < open; i++)

@@ -157,6 +157,7 @@ static int starts_atom(TokKind kind) {
     case TOK_KW_REC:
     case TOK_KW_FUN:
     case TOK_KW_FAMILY:
+    case TOK_KW_COFAMILY:
     case TOK_KW_AXIOM:
     case TOK_KW_AND:
       return 0;
@@ -393,6 +394,7 @@ static const Term *parse_atom(Parser *p) {
     case TOK_KW_REC:
     case TOK_KW_FUN:
     case TOK_KW_FAMILY:
+    case TOK_KW_COFAMILY:
     case TOK_KW_AXIOM:
     case TOK_KW_AND:
       break;
@@ -544,6 +546,24 @@ static int parse_family(Parser *p, Decl *d) {
   return 1;
 }
 
+/* `cofamily NAME params := F args` (S4 Q1): the greatest fixed point of
+   the layer family F at its last parameter. It has no constructor and no
+   `and`. The checker examines the body. */
+static int parse_cofamily(Parser *p, Decl *d) {
+  bump(p);
+  d->kind = DECL_COFAMILY;
+  d->is_rec = 0;
+  d->index = NULL;
+  d->ctors = NULL;
+  d->ctor_count = 0;
+  d->name = take_name(p, "a cofamily name");
+  if (d->name == NULL) return 0;
+  p->def = d->name;
+  if (!parse_fields(p, &d->params, &d->param_count) || !expect(p, TOK_DEFINE, "':='")) return 0;
+  d->body = parse_term(p);
+  return d->body != NULL;
+}
+
 /* `and NAME params [: index] := ctor | ...` (S6): the next sort of the
    block that FIRST starts. Only a `family` declaration starts a block. */
 static int at_and(const Parser *p, const Decl *first) {
@@ -569,6 +589,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_KW_DEF: return parse_def(p, d);
     case TOK_KW_AXIOM: return parse_axiom(p, d);
     case TOK_KW_FAMILY: return parse_family(p, d);
+    case TOK_KW_COFAMILY: return parse_cofamily(p, d);
     case TOK_KW_ELIM:
     case TOK_EOF:
     case TOK_IDENT:
@@ -596,7 +617,7 @@ static int parse_decl(Parser *p, Decl *d) {
     case TOK_KW_AND:
       break;
   }
-  return fail_at(p, tok, "'def', 'axiom' or 'family'");
+  return fail_at(p, tok, "'def', 'axiom', 'family' or 'cofamily'");
 }
 
 int parse_source(Arena *arena, const char *source, Origin origin, const TokenList *toks, DeclList *list, Diag *diag) {

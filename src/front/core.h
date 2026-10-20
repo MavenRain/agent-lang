@@ -94,7 +94,9 @@ typedef enum {
   OP_INT64_TO_NAT, /* int64ToNat a: some a when a >= 0, else none */
   OP_NAT_TO_INT64, /* natToInt64 n: some n when n <= 2^63 - 1, else none */
   OP_JSON_PARSE,   /* jsonParse t: inr of the Json value, or inl of the error text */
-  OP_JSON_RENDER   /* jsonRender j: the JSON text of j */
+  OP_JSON_RENDER,  /* jsonRender j: the JSON text of j */
+  OP_COUNFOLD,     /* unfold g s at a cofamily (S4): inst the cofamily; a canonical value */
+  OP_OUT           /* out x: inst the cofamily; one layer of x (S4) */
 } Op;
 
 /* The instance of pure, map, bind and filter (formers F5 and F8). */
@@ -139,8 +141,8 @@ struct Core {
   uint32_t field; /* OP_PROJ: the field number */
   const char *name; /* CORE_TEXT: the bytes */
   const uint32_t *limbs; /* CORE_BIG: the little-endian limbs, nat of them */
-  const Core *a; /* OP_FIN_CASE: its result type, for printing in inference mode */
-  const Core *b;
+  const Core *a; /* OP_FIN_CASE, OP_COUNFOLD: result type for source printing */
+  const Core *b; /* OP_COUNFOLD: seed type for source printing */
   const Core *const *args;
   uint32_t argc;
 };
@@ -243,8 +245,8 @@ struct Value {
   const char *name; /* LAM, PI, SIGMA: the binder. TEXT: the bytes. */
   int64_t i64;      /* INT64: the number */
   const uint32_t *limbs; /* BIG: the little-endian limbs, nat of them */
-  const Value *dom; /* PI, SIGMA: the domain. APP, PAPP: the function. FIN_CASE: result type. */
-  const Value *arg; /* APP, PAPP: the argument. A PI with no body: the codomain. */
+  const Value *dom; /* PI, SIGMA: domain. APP, PAPP: function. FIN_CASE, COUNFOLD: result type. */
+  const Value *arg; /* APP, PAPP: argument. PI with no body: codomain. COUNFOLD: seed type. */
   const Env *env;   /* LAM, PI, SIGMA, PLAM, PATHP: the closure */
   const Core *body;
   ClosTag tag;      /* LAM, PLAM: CLOS_CORE, or a Kan rule closure */
@@ -304,6 +306,10 @@ typedef struct {
      block_count. A family outside a block is a block of one. */
   uint32_t block_first;
   uint32_t block_count;
+  /* A cofamily (S4 Q1): the greatest fixed point of the layer family
+     LAYER at its last parameter. It has no constructors. 0 for a family. */
+  int cofamily;
+  uint32_t layer;
 } FamilyInfo;
 
 typedef struct {

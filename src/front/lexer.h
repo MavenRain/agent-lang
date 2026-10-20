@@ -32,7 +32,8 @@ typedef enum {
   TOK_KW_TYPE,
   TOK_KW_SIGMA,
   TOK_KW_AND,
-  TOK_KW_ELIM
+  TOK_KW_ELIM,
+  TOK_KW_COFAMILY
 } TokKind;
 
 typedef struct {
