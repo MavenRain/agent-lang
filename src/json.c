@@ -272,6 +272,9 @@ static int op_json(Out *o, const Value *type, const Value *v) {
   case OP_LIST:
     return list_json(o, type, v);
   case OP_FAMILY:
+    /* S4 Q7: a cofamily value has no JSON form. */
+    if (type->inst < o->m->family_count && o->m->families[type->inst].cofamily)
+      return refuse(o, "a coinductive value");
     return family_json(o, type, v);
   case OP_GLUE:
     return refuse(o, "a Glue element");
@@ -754,7 +757,9 @@ static int value_json(Out *o, const Value *type, const Value *v) {
 
 /* Functions, types and families are not instances. A path is an instance
    (R8). */
-static int is_instance(const DefInfo *d) {
+/* A def at a function type, a type or a cofamily type (S4 Q7) is left out
+   of the document. */
+static int is_instance(const Machine *m, const DefInfo *d) {
   if (d->origin != ORIGIN_PROGRAM)
     return 0;
   switch (d->type->kind) {
@@ -765,6 +770,7 @@ static int is_instance(const DefInfo *d) {
   case VAL_BIG:
     return 0;
   case VAL_OP:
+    return !(d->type->op == OP_FAMILY && d->type->inst < m->family_count && m->families[d->type->inst].cofamily);
   case VAL_PATHP:
   case VAL_SIGMA:
   case VAL_NAT:
@@ -811,7 +817,7 @@ int json_document(Machine *m, const char **text, size_t *len) {
     return diag_fail(m->diag, "OOM", NULL, "the arena limit is reached");
   ok = put_text(&o, "{") && put_string(&o, LANG_NAME) && put_text(&o, ":1,\"instances\":[");
   for (i = 0; ok && i < m->def_count; i++) {
-    if (is_instance(&m->defs[i])) {
+    if (is_instance(m, &m->defs[i])) {
       ok = instance_json(&o, i, type_text, first);
       first = 0;
     }

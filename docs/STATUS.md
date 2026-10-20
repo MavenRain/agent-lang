@@ -648,3 +648,57 @@ Deviations:
   number of arguments. `elim` keeps the builtin arity 3 before `rule_elim`:
   `codata-elim.lang` gives a motive, one case and the stream. An `elim`
   with 2 arguments at a cofamily stops at `TYPE_ARITY`.
+
+### Chunk B: eval and JSON
+
+Chunk B adds the `out` step, the transp rule at a cofamily and the JSON
+refusal of a cofamily value. `out (unfold g s)` spends 1 fuel and computes
+r := g s (Q4). When r is a constructor of the layer F ps S, the result is
+the same constructor of F ps (C ps). `out_field` changes an X field v to
+`unfold g v` (`counfold_at`), changes a Pi chain field f to
+`fun r1 ... rn => unfold g (f r1 ... rn)` and keeps a field without X. X is
+the core variable at index i + d in the type of field i under d Pi binders,
+as in `codata_positive`. `out` of a neutral argument or of a formal hcomp,
+and `out` with a neutral r, are stuck (`VAL_STUCK`). `reduce_out` is its own
+arm of `reduce_op`. The conversion of two unfolds and of two stuck `out`
+values uses the structural arm of chunk A: no step runs and there is no
+eta (`codata-bisim.lang` gives `PATH_END`). transp at a cofamily along a
+constant line gives the base (regularity). Along a line that changes, it is
+neutral. In json.c, a cofamily type is not an instance type, a def at a
+cofamily type is not in the document, and an instance that holds a
+cofamily value stops the build with `JSON_VALUE` (`a coinductive value`,
+Q7). `formers/tcc-json.md` `## S4 shapes` records these rules. An evaluated
+`out nats` and `fun x => out x` print as source that checks again, thus the
+printer does not change.
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 28 | 0 |
+| parse refusals | 14 | 0 |
+| check refusals | 78 | 0 |
+| evals | 127 | 0 |
+| json goldens | 28 | 0 |
+| build refusals | 4 | +1 (`codata.lang JSON_VALUE`) |
+| regressions | 6 | 0 |
+| printer regressions | 2 | 0 |
+| path regressions | 171 | +6 (one layer, two layers, the Pi chain map at depth 1 (`Mealy`) and depth 2, the stuck `out` of a variable with a round trip, transp along a constant and a changing `Stream` line, and the fuel of the second `out`) |
+
+Deviations:
+
+- The base is the USER commit e711b97 (tree 95265d81), not the chunk A tree
+  fd7ac4f0 of the hand-off. The USER added 10 path regressions to chunk A,
+  thus the chunk B count is 171 (165 + 6), not 161.
+- A Pi chain field maps through a new closure tag `CLOS_OUT_PI` at the end
+  of `ClosTag`. Its arguments are the unfold u and the field f, and its
+  field count is the number of binders that remain. The last binder gives
+  `unfold g (f r1 ... rn)`. There is no new Value kind.
+- transp at a cofamily tests the line with `line_constant`: the conversion
+  of the head at a fresh interval variable with the head at i0, at the
+  level `KAN_FRESH_BASE + KAN_FRESH_MASK + 1`. A constant line gives the
+  base. A line that changes stays neutral.
+- The fuel regression cannot use a fuel of 1, because `eval_core` spends 1
+  fuel at each core node. `out_fuel` measures K, the cost of `step` at a
+  variable (there `out` is stuck before the spend), and A, the cost of g s
+  at the seed of the tail. The second `out` gives a layer with K + A + 1
+  fuel and stops with `EVAL_FUEL` at K + A. A scratch copy of eval.c without
+  the spend (kickoff mutant M2) fails this case and only this case.

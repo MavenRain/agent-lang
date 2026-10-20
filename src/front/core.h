@@ -222,7 +222,9 @@ typedef enum {
   CLOS_PATH_SIGMA_COD, /* PLAM: i |-> B(i) (witness (p @ i)); args: L, p */
   CLOS_PI_DOM_UP,      /* PLAM: j |-> the domain of L(r /\ j); args: L, r */
   CLOS_PATH_PI_COD,    /* PLAM: j |-> B(j) (x moved up to A(j)); args: L, x */
-  CLOS_PATH_PI_POINT   /* PLAM: j |-> (p @ j) (x moved up to A(j)); args: L, p, x */
+  CLOS_PATH_PI_POINT,  /* PLAM: j |-> (p @ j) (x moved up to A(j)); args: L, p, x */
+  /* S4 chunk B. */
+  CLOS_OUT_PI          /* LAM: r |-> unfold g (f r), then FIELD - 1 more binders; args: u (the unfold g s), f */
 } ClosTag;
 
 typedef struct Value Value;

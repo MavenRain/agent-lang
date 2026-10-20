@@ -94,3 +94,19 @@ change an S2 shape.
   `{"inl":7}` for an integer that fits Int64, `{"inr":"1.5"}` for each
   other number text (`test/json/json.json`, `doc`):
   `{"tag":"jnum","jnumValue":{"inr":"1.5"}}`.
+
+## S4 shapes: cofamilies
+
+S4 adds no JSON shape. A cofamily value is an infinite object, thus the
+emitter does not write it (S4 Q7). The emitter does not change an S2 or an
+S3 shape.
+
+- A cofamily type, for example `Stream Nat` or `Mealy Nat Nat`, is not an
+  instance type.
+- A def at a cofamily type is not in the document, as a def at a function
+  type is not. A program with `def nats : Stream Nat := unfold ...` and
+  `def two : Nat := 2` gives
+  `{"agent-lang":1,"instances":[{"name":"two","type":"Nat","value":2}]}`.
+- An instance that holds a cofamily value stops the build with JSON_VALUE
+  (`test/emit/codata.lang`, `held : Prod (Stream Nat) Nat`):
+  `langc: JSON_VALUE: held: the instance holds a coinductive value, which has no JSON form`.

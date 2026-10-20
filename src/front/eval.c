@@ -1909,6 +1909,34 @@ static const Value *kan_closure(Machine *m, ValKind kind, ClosTag tag, uint32_t 
   return kan_closure4(m, kind, tag, field, argc, x, y, z, NULL);
 }
 
+/* unfold g v, for the unfold U = unfold g s (S4 Q4): the same step g, and
+   the types of U for source printing. */
+static const Value *counfold_at(Machine *m, const Value *u, const Value *v) {
+  const Value *args[2];
+  Value *out;
+  args[0] = u->args[0];
+  args[1] = v;
+  out = (Value *)val_op(m, VAL_OP, OP_COUNFOLD, u->inst, 0, args, 2);
+  if (out != NULL) {
+    out->dom = u->dom;
+    out->arg = u->arg;
+  }
+  return out;
+}
+
+/* The point field I of a layer constructor after out of the unfold U (S4
+   Q2), with V the field value and T its type, X at index I. An X field
+   becomes unfold g V. A Pi chain field with the codomain X becomes
+   fun r1 ... rn => unfold g (V r1 ... rn). Another field stays. */
+static const Value *out_field(Machine *m, const Value *u, const Core *t, uint32_t i, const Value *v) {
+  uint32_t depth = 0;
+  for (; t->kind == CORE_PI; t = t->b)
+    depth++;
+  if (t->kind != CORE_VAR || t->index != i + depth)
+    return v;
+  return depth == 0u ? counfold_at(m, u, v) : kan_closure(m, VAL_LAM, CLOS_OUT_PI, depth, 2, u, v, NULL);
+}
+
 static const Value *transp(Machine *m, const Value *line, const Value *phi, const Value *base);
 static const Value *hcomp(Machine *m, const Value *ty, const Value *phi, const Value *sys, const Value *base);
 static const Value *hcomp_stuck(Machine *m, const Value *ty, const Value *phi, const Value *sys, const Value *base);
@@ -2041,6 +2069,11 @@ static const Value *kan_apply(Machine *m, const Value *k, const Value *r) {
     return transp(m, kan_closure(m, VAL_PLAM, CLOS_PI_COD, 0, 3, a[0], a[1], r), a[1], apply_value(m, a[2], pi_back(m, a[0], a[1], r, val_iend(m, 0))));
   case CLOS_CONST:
     return a[0];
+  case CLOS_OUT_PI:
+    t = apply_value(m, a[1], r);
+    if (t == NULL)
+      return NULL;
+    return k->field > 1u ? kan_closure(m, VAL_LAM, CLOS_OUT_PI, k->field - 1u, 2, a[0], t, NULL) : counfold_at(m, a[0], t);
   case CLOS_SYS_APP:
     return apply_value(m, closure_apply(m, a[0], r), a[1]);
   case CLOS_SYS_PAPP:
@@ -2239,6 +2272,13 @@ static const Value *transp_family(Machine *m, const Value *line, const Value *ph
 /* Rules 3, 4 and 8 (R4 (a)): L(i) is the data type FORMER at a fresh i. A
    closed type gives the base; a constructor base goes into its arguments;
    a neutral base and a domain family are stuck. */
+/* The line L is the type HEAD (L at a fresh variable) at each point: HEAD
+   converts with L(i0). The levels of the test are above the fresh levels. */
+static int line_constant(Machine *m, const Value *line, const Value *head) {
+  const Value *end = line_at(m, line, val_iend(m, 0));
+  return end != NULL && conv_values(m, KAN_FRESH_BASE + KAN_FRESH_MASK + 1u, head, end);
+}
+
 static const Value *transp_data(Machine *m, const Value *head, const Value *line, const Value *phi, const Value *base) {
   int neutral = scrut_of(base) == SCRUT_NEUTRAL;
   switch (head->op) {
@@ -2274,6 +2314,13 @@ static const Value *transp_data(Machine *m, const Value *head, const Value *line
       break;
     return transp_list(m, line, phi, base);
   case OP_FAMILY:
+    /* S4 chunk B: at a cofamily, the regularity rule on a constant line.
+       On a line that changes, the transport stays neutral. */
+    if (head->inst < m->family_count && m->families[head->inst].cofamily) {
+      if (line_constant(m, line, head))
+        return base;
+      break;
+    }
     /* Indexed fibres and sibling sorts need their own field lines. Keep
        the transport neutral until those reductions are implemented. */
     if (head->inst < m->family_count && (m->families[head->inst].index_count > 0u || m->families[head->inst].block_count > 1u))
@@ -3251,6 +3298,42 @@ const Value *val_ctor(Machine *m, uint32_t inst, const Value *const *a, uint32_t
   return reduce_ctor(m, inst, 0, a, n);
 }
 
+/* out (unfold g s) (S4 Q4): 1 fuel, r := g s. The layer r, a constructor
+   of F ps S, becomes the same constructor of F ps (C ps), with each field
+   from out_field. A neutral argument, a formal hcomp or a neutral r is
+   stuck. */
+static const Value *reduce_out(Machine *m, uint32_t inst, const Value *const *a, uint32_t n) {
+  uint32_t p = m->families[inst].param_count;
+  const CtorInfo *ctor;
+  const Value **args;
+  const Value *r;
+  const Value *out;
+  uint32_t i;
+  if (blocked(m, a[0], OP_OUT, inst, 0, a, n, &out))
+    return out;
+  if (val_is(a[0], OP_HCOMP))
+    return val_op(m, VAL_STUCK, OP_OUT, inst, 0, a, n);
+  if (!val_is(a[0], OP_COUNFOLD) || a[0]->argc != 2u)
+    return internal(m, "an out of a value that is not an unfold");
+  r = spend(m, 1) ? apply_value(m, a[0]->args[0], a[0]->args[1]) : NULL;
+  if (r == NULL)
+    return NULL;
+  if (blocked(m, r, OP_OUT, inst, 0, a, n, &out))
+    return out;
+  ctor = val_is(r, OP_CTOR) && r->inst < m->ctor_count ? &m->ctors[r->inst] : NULL;
+  if (ctor == NULL || ctor->family != m->families[inst].layer || r->argc != p + 1u + ctor->field_count)
+    return internal(m, "a layer that is not a constructor of the layer family");
+  args = arena_alloc(m->arena, (size_t)r->argc * sizeof *args);
+  if (args == NULL)
+    return oom(m);
+  for (i = 0; i < p; i++)
+    args[i] = r->args[i];
+  args[p] = val_op(m, VAL_OP, OP_FAMILY, inst, 0, r->args, p);
+  for (i = 0; i < ctor->field_count; i++)
+    args[p + 1u + i] = out_field(m, a[0], ctor->fields[i].type, i, r->args[p + 1u + i]);
+  return val_op(m, VAL_OP, OP_CTOR, r->inst, r->field, args, r->argc);
+}
+
 static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, const Value *const *a, uint32_t n) {
   if (!arity_ok(m, op, inst, n))
     return internal(m, "an operation with the wrong number of arguments");
@@ -3278,9 +3361,8 @@ static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, 
   case OP_CONS:
   case OP_PACK:
     return val_op(m, VAL_OP, op, inst, field, a, n);
-  /* S4 chunk A stub: out is stuck; chunk B adds the step. */
   case OP_OUT:
-    return val_op(m, VAL_STUCK, op, inst, field, a, n);
+    return reduce_out(m, inst, a, n);
   case OP_CTOR:
     return reduce_ctor(m, inst, field, a, n);
   case OP_SYSTEM:

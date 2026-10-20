@@ -94,6 +94,48 @@ static int big_fold_fuel(void) {
   return ok;
 }
 
+/* S4 chunk B: out (unfold g s) spends 1 fuel, then g s spends its own (Q4).
+   K is the cost of step at a variable: there out is stuck before the spend.
+   A is the cost of g s at the seed of the tail. Thus the second out, the out
+   of the tail, gives a layer with K + A + 1 fuel and traps with K + A. */
+static int out_fuel(void) {
+  Arena arena;
+  Machine m;
+  Diag diag;
+  const Value *step, *layer, *tail;
+  uint64_t k = 0u, a = 0u;
+  int ok;
+  cases_run++;
+  arena_init(&arena, (size_t)128 << 20);
+  ok = checked(&arena, &m, &diag,
+    "def nats : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
+    "def step : Stream Nat -> StreamF Nat (Stream Nat) := fun (x : Stream Nat) => out x\n");
+  step = ok ? def_value(&m, m.def_count - 1u) : NULL;
+  layer = step != NULL ? apply_value(&m, step, def_value(&m, m.def_count - 2u)) : NULL;
+  tail = layer != NULL && val_is(layer, OP_CTOR) && layer->argc == 4u ? layer->args[3] : NULL;
+  ok = tail != NULL && val_is(tail, OP_COUNFOLD) && tail->argc == 2u;
+  if (ok) {
+    m.fuel = EVAL_FUEL_STEPS;
+    ok = apply_value(&m, step, val_var(&m, 0u)) != NULL;
+    k = EVAL_FUEL_STEPS - m.fuel;
+    m.fuel = EVAL_FUEL_STEPS;
+    ok = ok && apply_value(&m, tail->args[0], tail->args[1]) != NULL;
+    a = EVAL_FUEL_STEPS - m.fuel;
+    m.fuel = k + a + 1u;
+    ok = ok && apply_value(&m, step, tail) != NULL;
+  }
+  if (ok) {
+    m.fuel = k + a;
+    ok = apply_value(&m, step, tail) == NULL && diag.set && strcmp(diag.code, "EVAL_FUEL") == 0;
+  }
+  if (!ok) {
+    fprintf(stderr, "FAIL the second out traps when the fuel is 1 step short\n");
+    diag_print(&diag, stderr);
+  }
+  arena_release(&arena);
+  return ok;
+}
+
 static int accepts(const char *label, const char *source) {
   cases_run++;
   Arena arena;
@@ -942,6 +984,35 @@ int main(void) {
   failed += !roundtrip("coiteration with a cofamily seed round trips",
     "def seed : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
     "def nats : Stream Nat := unfold (fun (s : Stream Nat) => scons Nat (Stream Nat) 0 s) seed\n");
+  /* S4 chunk B: the out step. */
+  failed += !accepts("out: one layer",
+    "def nats : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
+    "def one : Path (StreamF Nat (Stream Nat)) (out nats) "
+    "(scons Nat (Stream Nat) 0 (unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 1)) := refl\n");
+  failed += !accepts("out: two layers",
+    "def nats : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
+    "def two : Path (StreamF Nat (Stream Nat)) "
+    "(out (elim (fun (l : StreamF Nat (Stream Nat)) => Stream Nat) (fun (h : Nat) (t : Stream Nat) => t) (out nats))) "
+    "(scons Nat (Stream Nat) 1 (unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 2)) := refl\n");
+  failed += !domain_accepts("out: a Pi chain field maps under its binders",
+    "family PairInF (I0 : Type 0) (X : Type 0) := pairIn (pairInNext : I0 -> I0 -> X)\n"
+    "cofamily PairIn (I0 : Type 0) := PairInF I0\n",
+    "def counter : Mealy Nat Nat := unfold (fun (s : Nat) => mealy Nat Nat Nat s (fun (i : Nat) => natAdd s i)) 0\n"
+    "def counterOut : Path (MealyF Nat Nat (Mealy Nat Nat)) (out counter) (mealy Nat Nat (Mealy Nat Nat) 0 "
+    "(fun (i : Nat) => unfold (fun (s : Nat) => mealy Nat Nat Nat s (fun (i : Nat) => natAdd s i)) (natAdd 0 i))) := refl\n"
+    "def sum : PairIn Nat := unfold (fun (s : Nat) => pairIn Nat Nat (fun (a : Nat) (b : Nat) => natAdd s (natAdd a b))) 0\n"
+    "def sumOut : Path (PairInF Nat (PairIn Nat)) (out sum) (pairIn Nat (PairIn Nat) "
+    "(fun (a : Nat) (b : Nat) => unfold (fun (s : Nat) => pairIn Nat Nat (fun (a : Nat) (b : Nat) => natAdd s (natAdd a b))) "
+    "(natAdd 0 (natAdd a b)))) := refl\n");
+  failed += !roundtrip("out of a variable is stuck and round trips",
+    "def same : (x : Stream Nat) -> Path (StreamF Nat (Stream Nat)) (out x) (out x) := fun (x : Stream Nat) => refl\n"
+    "def step : Stream Nat -> StreamF Nat (Stream Nat) := fun (x : Stream Nat) => out x\n");
+  failed += !roundtrip("transp at a cofamily: a constant line gives the base, a line that changes is neutral",
+    "def nats : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat n (succ n)) 0\n"
+    "def constant : Path (Stream Nat) (transp (fun (i : I) => Stream Nat) i0 nats) nats := refl\n"
+    "def moved : (A : Type 0) -> (B : Type 0) -> Path (Type 0) A B -> Stream A -> Stream B := "
+    "fun (A : Type 0) (B : Type 0) (p : Path (Type 0) A B) (s : Stream A) => transp (fun (i : I) => Stream (p @ i)) i0 s\n");
+  failed += !out_fuel();
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }
