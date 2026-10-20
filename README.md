@@ -11,6 +11,10 @@ language comes from lang-template with the tcc-json host (TinyCC). The
 build plan is `docs/PLAN.md`. S1 (the coin-lang kernel port) is in: paths,
 `transp`, `hcomp`, Glue, `ua`, the HITs `S1`, `Trunc1`, `Trunc0` and `Quot`,
 `Fin`, and the builtins `Empty` and `absurd` (`docs/STATUS.md`, section S1).
+S3 (the base span) is in (`docs/STATUS.md`, section S3). A `Text` holds
+bytes. An `Int64` wraps. A `Nat` has no bound. `Json` is the domain tree
+that `jsonParse` and `jsonRender` read and write. A `Log` is a snoc list
+of `Json` (`logEmpty`, `logAppend`).
 
 - `SPEC.md`: the specification. Fill each section.
 - `design/DESIGN.md`: the domain design. It is the only source of the core

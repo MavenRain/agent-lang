@@ -1,0 +1,17 @@
+-- Log (S3, PLAN row 163): a snoc list of Json entries. logAppend adds an
+-- entry at the end, logLength counts the entries by fold. The elim with a
+-- constant motive counts the same way, and a Path shows that the two
+-- agree. A fold renders the entries in order. The entry builds a Log of n
+-- null entries and gives its length.
+def startEntry : Json := jobj (jfCons "event" (jstr "start") jfNil)
+def countEntry : Json := jnum (inl 42)
+def emptyLog : Log := logEmpty
+def oneLog : Log := logAppend logEmpty startEntry
+def twoLog : Log := logAppend oneLog countEntry
+def twoLength : Nat := logLength twoLog
+def countE : Log -> Nat := fun (l : Log) => elim (fun (k : Log) => Nat) 0 (fun (rest : Log) (ih : Nat) (entry : Json) => succ ih) l
+def twoCountE : Nat := countE twoLog
+def countAgrees : Path Nat (countE twoLog) (logLength twoLog) := refl
+def lastRendered : Text := fold "" (fun (rest : Text) (entry : Json) => jsonRender entry) twoLog
+def allRendered : Text := fold "" (fun (rest : Text) (entry : Json) => textAppend rest (jsonRender entry)) twoLog
+def nulls : (n : Nat) -> Nat := fun (n : Nat) => logLength (fold (fun (l : Log) => logAppend l jnull) logEmpty n)

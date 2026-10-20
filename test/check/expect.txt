@@ -69,3 +69,4 @@ text-literal-type.lang TYPE_MISMATCH
 text-slice-arity.lang TYPE_ARITY
 int64-literal-range.lang TYPE_MISMATCH
 json-entry-type.lang TYPE_MISMATCH
+log-entry-type.lang TYPE_MISMATCH

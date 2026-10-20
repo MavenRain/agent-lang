@@ -325,6 +325,18 @@ static int nat_literal_oom(void) {
   return ok;
 }
 
+/* jsonParse stops past 512 levels of nesting (JSON_DEPTH_MAX): 513 open
+   brackets parse, and the 514th bracket, at byte 513, gives the error. */
+static int json_nesting(void) {
+  char source[2048];
+  int at = snprintf(source, sizeof source, "def r : Path (Sum Text Json) (jsonParse \"");
+  int i;
+  for (i = 0; i < 514; i++)
+    source[at++] = '[';
+  snprintf(source + at, sizeof source - (size_t)at, "\") (inl \"byte 513: the nesting is deeper than 512 levels\") := refl\n");
+  return accepts("JSON nesting stops past 512 levels", source);
+}
+
 int main(void) {
   int failed = 0;
   failed += !nat_literal_oom();
@@ -854,6 +866,21 @@ int main(void) {
   failed += !json_domain_shape("Text", "Text", "Fin 2", "", "JSON_FAMILY");
   failed += !json_domain_shape("Text", "Sum Int64 Text", "Nat", "", "JSON_FAMILY");
   failed += !json_domain_shape("Text", "Sum Int64 Text", "Fin 2", "| jextra", "JSON_FAMILY");
+  /* S3 chunk C: the Json block and the Log family. elim refuses a block
+     sort (elim-block.lang), so the Json case is the block fold: it counts
+     the nodes of a tree with an array, an object and a string. The Log case
+     is an elim with a constant motive; it agrees with logLength and gives 2. */
+  failed += !accepts("the Json block fold counts the nodes",
+    "def r : Path Nat (fold Nat Nat Nat 1 (fun (b : Fin 2) => 1) (fun (n : Sum Int64 Text) => 1) (fun (s : Text) => 1) "
+    "(fun (items : Nat) => succ items) (fun (fields : Nat) => succ fields) 0 (fun (h : Nat) (t : Nat) => natAdd h t) "
+    "0 (fun (k : Text) (v : Nat) (t : Nat) => natAdd v t) "
+    "(jarr (jlCons jnull (jlCons (jobj (jfCons \"k\" (jstr \"a\") jfNil)) jlNil)))) 4 := refl\n");
+  failed += !json_nesting();
+  failed += !accepts("the Log elim agrees with logLength",
+    "def s : Path Nat (elim (fun (l : Log) => Nat) 0 (fun (rest : Log) (ih : Nat) (entry : Json) => succ ih) "
+    "(logAppend (logAppend logEmpty jnull) (jbool true))) (logLength (logAppend (logAppend logEmpty jnull) (jbool true))) := refl\n"
+    "def t : Path Nat (elim (fun (l : Log) => Nat) 0 (fun (rest : Log) (ih : Nat) (entry : Json) => succ ih) "
+    "(logAppend (logAppend logEmpty jnull) (jbool true))) 2 := refl\n");
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

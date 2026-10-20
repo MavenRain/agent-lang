@@ -15,3 +15,7 @@ def bigSum : Nat := natAdd 18446744073709551615 1
 def bigShown : Text := natShow bigSum
 def sumDigits : (a b : Nat) -> Nat := fun (a b : Nat) => textLength (natShow (natAdd a b))
 def tagLength : (n : Nat) -> Nat := fun (n : Nat) => textLength (textAppend "#" (natShow n))
+def acuteLength : Nat := textLength "\xc3\xa9"
+def halfAcute : Fin 2 := textUtf8 (textSlice "\xc3\xa9" 0 1)
+def sameIsTrue : Path (Fin 2) (textEq "a" "a") true := refl
+def tailAcute : Fin 2 := textUtf8 (textSlice "é" 1 2)

@@ -506,3 +506,90 @@ forms print as source expressions, including the minimum integer; a closed
 Int64 eval still prints a signed decimal. The C regression suite adds 21
 review cases, including carry and borrow boundaries, and passes all 144
 cases under TinyCC and under Clang AddressSanitizer and UndefinedBehaviorSanitizer.
+
+### Chunk C: examples, mutants and docs
+
+Chunk C adds the S3 guest tests, the mutant run and the docs. It changes
+no source file beyond HEAD 0cd6954. `examples/nat.lang` (15 eval rows) and
+`examples/log.lang` (10 eval rows) are new, with the goldens
+`test/json/nat.json` and `test/json/log.json`. `text.lang` gets the rows
+`acuteLength`, `halfAcute`, `tailAcute` and `sameIsTrue`, and `json.lang`
+gets `maxNumber`, `overNumber`, `minNumber` and `underNumber`; `text.json`
+and `json.json` are regenerated. The check row `log-entry-type.lang
+TYPE_MISMATCH` refuses `logAppend logEmpty 3`. The three new path
+regressions are the Json block fold (a tree of 4 nodes), the Log elim (it
+agrees with `logLength` and gives 2) and `json_nesting` (514 open
+brackets give `inl "byte 513: the nesting is deeper than 512 levels"`).
+README.md gives the base types, and the PLAN section 8 row S3 is DONE.
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 28 | +2 (`nat.lang`, `log.lang`) |
+| parse refusals | 13 | 0 |
+| check refusals | 72 | +1 (`log-entry-type.lang`) |
+| evals | 127 | +33 (15 nat, 10 log, 4 text and 4 json rows) |
+| json goldens | 28 | +2 (`nat.json`, `log.json`; `text.json` and `json.json` regenerated) |
+| build refusals | 3 | 0 |
+| regressions | 6 | 0 |
+| printer regressions | 2 | 0 |
+| path regressions | 147 | +3 (the Json block fold, the Log elim, `json_nesting`) |
+
+Mutants (`S3-C-mutants.sh`, outside the repo, 15 edits; each edit is a
+Python string replace that must apply one time, then `make -B check`,
+then a `git checkout` restore that `shasum` confirms). Run 1, before the
+survivor tests, printed `mutants: 15 run, 12 killed, 3 survived`: M4, M14
+and M15 survived. Then the rows `tailAcute`, `bigLessSame` and
+`bigLeSame` and the `json_nesting` path regression were added. Run 2, all
+15 edits again, printed `mutants: 15 run, 15 killed, 0 survived`. A guest
+test or a path regression kills each mutant; no mutant stops at domain
+load.
+
+| Id | File | Edit | Killer | Result |
+|---|---|---|---|---|
+| M1 | `src/front/eval.c` | `textAppend`: the operands swap places | eval `text greeting`: `"worldhello, "` | KILLED |
+| M2 | `src/front/eval.c` | `textLength` counts code points, not bytes | eval `text acuteLength`: 1 for 2 | KILLED |
+| M3 | `src/front/eval.c` | `textSlice`: the end offset is not clamped | eval `text clamped` (deviation (g)) | KILLED |
+| M4 | `src/front/jsontext.c` | `text_utf8_valid`: `c < 0x80u` to `c < 0xc0u` (a lone continuation byte is valid) | eval `text tailAcute`: 1 for 0 | SURVIVED run 1, KILLED run 2 |
+| M5 | `src/front/eval.c` | `int64Add` stops at the maximum and does not wrap | eval `int64 wrapped`: 9223372036854775807 for -9223372036854775808 | KILLED |
+| M6 | `src/front/eval.c` | `int64Rem`: the sign of the result flips | eval `int64 remainder`: `some 1` for `some (int64Neg 1)` | KILLED |
+| M7 | `src/front/big.c` | big add: the carry out of the top limb is lost | eval `entries addPrice`: 0 for 18446744073709551616 | KILLED |
+| M8 | `src/front/eval.c` | Nat demote: a result of two limbs below 2^64 stays `VAL_BIG` | `examples/nat.lang` `demotePath`: PATH_END | KILLED |
+| M9 | `src/front/jsontext.c` | `jsonParse`: a positive 2^63 fits Int64 | eval `json overNumber`: `jnum (inl ...)` for `jnum (inr "9223372036854775808")` | KILLED |
+| M10 | `src/front/jsontext.c` | `jsonRender`: no escape for `"` | eval `json escaped` | KILLED |
+| M11 | `src/front/check.c` | the Int64 literal bound is 2^63, not 2^63 - 1 | check `int64-literal-range.lang`: exit 0 for TYPE_MISMATCH | KILLED |
+| M12 | `src/json.c` | a Text that is not valid UTF-8 goes out as a JSON string | the golden `test/json/text.json` | KILLED |
+| M13 | `src/front/check.c` | `textEq` gives Nat, not `Fin 2` | `examples/text.lang` `sameText`: TYPE_MISMATCH | KILLED |
+| M14 | `src/front/jsontext.c` | `JSON_DEPTH_MAX` 512 to 511 | path regression `json_nesting`: the error at byte 512 | SURVIVED run 1, KILLED run 2 |
+| M15 | `src/front/big.c` | `big_cmp`: the sign of a limb comparison flips | eval `nat bigLessSame`: 1 for 0 | SURVIVED run 1, KILLED run 2 |
+
+Deviations:
+
+- (a) The chunk B commit has 21 review regressions, so the path
+  regressions start at 144 and the target is 147, not 126.
+- (b) The review case "big arithmetic carries and borrows through every
+  limb" already has the M8 regression `def d : Path Nat (natSub
+  18446744073709551616 1) 18446744073709551615 := refl`, so chunk C does
+  not copy it. `demotePath` in `nat.lang` is the guest copy, and it kills
+  M8 first.
+- (c) `elim` refuses a block sort (`elim-block.lang`), so the Json path
+  regression is the block fold.
+- (d) The kickoff killer for M4, `textUtf8 (textSlice "\xc3\xa9" 0 1)`,
+  is a lead byte without its continuation byte, not a lone continuation
+  byte. Thus M4 survived run 1. The row `tailAcute` (`textSlice
+  "\xc3\xa9" 1 2`) kills it. The row `halfAcute` stays.
+- (e) The M9 and M10 sites are in `src/front/jsontext.c`, not in
+  `eval.c`.
+- (f) The first M12 edit (`v->nat == v->nat`) stopped at the clang
+  warning `-Wtautological-compare`, not at a guest test. The edit is now
+  `text_utf8_valid(...) || v->kind == VAL_TEXT`.
+- (g) M3 reads past the end of the text, so its log has a NUL byte. The
+  shell drops the NUL, and the log shows `"o"` on the two sides; the
+  runner reads the logs with `rg -a`.
+- (h) M14 (512 to 511) survived run 1. The new `json_nesting` regression
+  kills it: under the mutant the error is at byte 512.
+- (i) M15 (the `big_cmp` limb sign) survived run 1, because `bigLess`
+  compares two different limb counts. The new rows `bigLessSame` and
+  `bigLeSame` compare two Nats with the same limb count and kill it.
+- (j) `json.lang` `minNumber` prints `inr (jnum (inl (int64Add
+  9223372036854775807 1)))`: the chunk B review prints a negative Int64
+  as source.

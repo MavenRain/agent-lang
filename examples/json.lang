@@ -9,3 +9,7 @@ def rendered : Text := jsonRender (jobj (jfCons "id" (jnum (inl 7)) (jfCons "ok"
 def escaped : Text := jsonRender (jstr "a\"b\x01")
 def roundTrip : Path (Sum Text Json) (jsonParse (jsonRender (jarr (jlCons (jnum (inl 1)) (jlCons jnull jlNil))))) (inr (jarr (jlCons (jnum (inl 1)) (jlCons jnull jlNil)))) := refl
 def renderedLength : (n : Nat) -> Nat := fun (n : Nat) => textLength (jsonRender (jarr (jlCons (jnum (inr (natShow n))) jlNil)))
+def maxNumber : Sum Text Json := jsonParse "9223372036854775807"
+def overNumber : Sum Text Json := jsonParse "9223372036854775808"
+def minNumber : Sum Text Json := jsonParse "-9223372036854775808"
+def underNumber : Sum Text Json := jsonParse "-9223372036854775809"

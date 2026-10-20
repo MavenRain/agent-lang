@@ -92,3 +92,36 @@ json roundTrip => fun _ => inr (jarr (jlCons (jnum (inl 1)) (jlCons jnull jlNil)
 text sumDigits 18446744073709551615 1 => 20
 text tagLength 12345 => 6
 json renderedLength 12 => 4
+nat wordMax => 18446744073709551615
+nat twoTo64 => 18446744073709551616
+nat twoTo128 => 340282366920938463463374607431768211456
+nat bigSum => 340282366920938463481821351505477763072
+nat demoted => 18446744073709551615
+nat floorZero => 0
+nat bigDiff => 0
+nat bigShown => "340282366920938463463374607431768211456"
+nat bigSame => 1
+nat bigLess => 0
+nat demotePath => fun _ => 18446744073709551615
+nat oddGap 3 => 7
+nat oddGap 18446744073709551615 => 36893488147419103231
+log emptyLog => logEmpty
+log oneLog => logAppend logEmpty (jobj (jfCons "event" (jstr "start") jfNil))
+log twoLog => logAppend (logAppend logEmpty (jobj (jfCons "event" (jstr "start") jfNil))) (jnum (inl 42))
+log twoLength => 2
+log twoCountE => 2
+log countAgrees => fun _ => 2
+log lastRendered => "42"
+log allRendered => "{\"event\":\"start\"}42"
+log nulls 3 => 3
+log nulls 0 => 0
+text acuteLength => 2
+text halfAcute => 0
+text sameIsTrue => fun _ => 1
+json maxNumber => inr (jnum (inl 9223372036854775807))
+json overNumber => inr (jnum (inr "9223372036854775808"))
+json minNumber => inr (jnum (inl (int64Add 9223372036854775807 1)))
+json underNumber => inr (jnum (inr "-9223372036854775809"))
+text tailAcute => 0
+nat bigLessSame => 0
+nat bigLeSame => 1

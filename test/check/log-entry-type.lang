@@ -1,0 +1,2 @@
+-- logEntry takes a Json, so a Nat entry is refused.
+def wrong : Log := logAppend logEmpty 3
