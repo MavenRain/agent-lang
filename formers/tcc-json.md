@@ -49,3 +49,26 @@ retain their structure. Formal `hcomp` objects include `phi`, `tube` and
 | C6 | HITs `S1`, `Trunc1`, `Trunc0`, `Quot` | DONE: `examples/circle.lang`, `examples/trunc.lang`, `examples/quot.lang` |
 | C7 | `Fin` and the Fin transport tables in JSON | DONE: `examples/fin.lang`, `examples/dec.lang`, `test/json/fin.json` |
 | C8 | The builtins `Empty` and `absurd` | DONE: `examples/dec.lang`, `test/path-regressions.c` |
+
+## S2 shapes: indexed constructors, block folds and elims
+
+The three S2 goldens show the shapes that S2 adds. The emitter does not
+change the 20 S1 goldens.
+
+- An indexed constructor value is an object with `tag` and one member for
+  each field, in field order. The index arguments of the type are not
+  fields, so they do not appear in the value (`test/json/indexed.json`):
+  `{"name":"vecTwo","type":"Vec (Fin 2) 2","value":{"tag":"vcons","consLen":1,"consHead":0,"consTail":{"tag":"vcons","consLen":0,"consHead":1,"consTail":{"tag":"vnil"}}}}`.
+  A path constructor of an indexed family keeps the S1 shape
+  `{"path":NAME,"args":[...]}`, for example `{"path":"vswap","args":[0,0,1,{"tag":"vnil"}]}`.
+- A value of a block sort has the same object shape. A field of a sibling
+  sort is printed at the sibling type: the `adopt` value of `Charter Nat`
+  holds a `Ratified Nat (genesis Nat)` field, and the single constructor
+  of `Ratified` prints without a `tag` (`test/json/mutual.json`):
+  `{"name":"charterOne","type":"Charter Nat","value":{"tag":"adopt","adoptBase":{"tag":"genesis"},"adoptRule":{"ratifyBase":{"tag":"genesis"},"ratifyRule":7}}}`.
+  A block fold that computes is a plain value: `{"name":"adoptedOne","type":"Nat","value":7}`.
+- An elim that computes is a plain value (`{"name":"vecTwoCountE","type":"Nat","value":2}`)
+  or a refl (`{"name":"quotEqAtE","type":"PathP (fun _ => Trunc0 (Fin 4)) (trunc0 (Fin 4) 2) (trunc0 (Fin 4) 2)","value":{"refl":{"trunc":2}}}`).
+  A stuck elim on a formal `hcomp` is printed as a path with `from`, `to`
+  and the `term` as source text (`test/json/elim.json`, `hcompE`):
+  `"value":{"from":{"tag":"vcons",...},"to":{"tag":"vcons",...},"term":"fun j => elim (fun k => fun w => Vec (Fin 2) k) (vnil (Fin 2)) (fun _x0 => ... ) (hcomp (Vec (Fin 2) 2) (j \/ ~j) (fun i => [ ... ]) (...))"}`.

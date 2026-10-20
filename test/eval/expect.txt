@@ -46,3 +46,16 @@ dec sqFin => fun j => fun i => 1
 dec isRight01 => fun _ => 1
 dec isRightNat => fun _ => 1
 dec dec00 => fun _ => inl (fun _x0 => 0)
+indexed vecTwoCount => 2
+indexed vecSwappedCount => 2
+mutual adoptedZero => 0
+mutual adoptedOne => 7
+mutual adoptedLaw => 7
+elim vecTwoCountE => 2
+elim vecTwo => vcons (Fin 2) 1 1 (vcons (Fin 2) 0 0 (vnil (Fin 2)))
+elim swapAt0 => vcons (Fin 2) 1 1 (vcons (Fin 2) 0 0 (vnil (Fin 2)))
+elim swapAt1 => vcons (Fin 2) 1 0 (vcons (Fin 2) 0 1 (vnil (Fin 2)))
+elim vecSwapE => fun i => vswap (Fin 2) 0 1 0 (vnil (Fin 2)) i
+elim quotThreeE => trunc0 (Fin 4) 2
+elim quotEqAtE => fun i => trunc0 (Fin 4) 2
+elim hcompE => fun j => elim (fun k => fun w => Vec (Fin 2) k) (vnil (Fin 2)) (fun _x0 => fun _x1 => fun _x2 => fun ih => vcons (Fin 2) _x0 (finAdd 2 _x1 1) ih) (fun _x0 => fun _x1 => fun _x2 => fun _x3 => fun ih => fun i => vswap (Fin 2) _x0 (finAdd 2 _x1 1) (finAdd 2 _x2 1) ih i) (hcomp (Vec (Fin 2) 2) (j \/ ~j) (fun i => [ ~j -> vcons (Fin 2) 1 0 (vcons (Fin 2) 0 1 (vnil (Fin 2))), j -> vswap (Fin 2) 0 0 1 (vnil (Fin 2)) i ]) (vcons (Fin 2) 1 0 (vcons (Fin 2) 0 1 (vnil (Fin 2)))))

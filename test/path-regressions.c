@@ -651,6 +651,30 @@ int main(void) {
     "def identityProof : (n : Nat) -> (v : Vec Nat n) -> Path (Vec Nat n) v v := fun (n : Nat) (v : Vec Nat n) => "
     "elim (fun (k : Nat) (w : Vec Nat k) => Path (Vec Nat k) w w) refl "
     "(fun l h t ih => refl) (fun l x y r ih => fun (i : I) => refl) v\n");
+  /* S2 chunk C, the M7 guest test: a fold at a neutral quotEq case g
+     stores its ends in the PAPP. A cong line quotes them, and the line at
+     i1 reads the stored i1 end (trunc0 2, not the i0 end trunc0 a). */
+  failed += !domain_accepts("cong at i1 of a fold with a neutral path case reads the i1 end", "",
+    "def Eq4 : Fin 4 -> Fin 4 -> Type 0 := fun (a : Fin 4) (b : Fin 4) => Path (Fin 4) a b\n"
+    "def selfPath : (x : Trunc0 (Fin 4)) -> Path (Trunc0 (Fin 4)) x x := fun (x : Trunc0 (Fin 4)) => refl\n"
+    "def foldG : ((a : Fin 4) -> (b : Fin 4) -> Path (Fin 4) a b -> Path (Trunc0 (Fin 4)) (trunc0 (Fin 4) a) (trunc0 (Fin 4) b)) -> Quot (Fin 4) Eq4 -> Trunc0 (Fin 4) := "
+    "fun (g : (a : Fin 4) -> (b : Fin 4) -> Path (Fin 4) a b -> Path (Trunc0 (Fin 4)) (trunc0 (Fin 4) a) (trunc0 (Fin 4) b)) (z : Quot (Fin 4) Eq4) => "
+    "fold (fun (a : Fin 4) => trunc0 (Fin 4) a) g "
+    "(fun (x : Trunc0 (Fin 4)) (y : Trunc0 (Fin 4)) (p : Path (Trunc0 (Fin 4)) x y) (q : Path (Trunc0 (Fin 4)) x y) => fun (i : I) => fun (j : I) => squash0 (Fin 4) x y p q i j) z\n"
+    "def atEnd : (g : (a : Fin 4) -> (b : Fin 4) -> Path (Fin 4) a b -> Path (Trunc0 (Fin 4)) (trunc0 (Fin 4) a) (trunc0 (Fin 4) b)) -> (a : Fin 4) -> (r : Path (Fin 4) a 2) -> "
+    "Path (Trunc0 (Fin 4)) (trunc0 (Fin 4) 2) (trunc0 (Fin 4) 2) := "
+    "fun (g : (a : Fin 4) -> (b : Fin 4) -> Path (Fin 4) a b -> Path (Trunc0 (Fin 4)) (trunc0 (Fin 4) a) (trunc0 (Fin 4) b)) (a : Fin 4) (r : Path (Fin 4) a 2) => "
+    "cong selfPath (fun (i : I) => foldG g (quotEq (Fin 4) Eq4 a 2 r i)) @ i1\n");
+  /* S2 chunk C, the N4 killer: fold_res reads the target of the sort of a
+     block fold. Odd has a path constructor, so an hcomp at Odd is formal,
+     and the fold of it composes at the Odd target Fin 2, not at the Even
+     target Nat. The round trip prints the hcomp type and checks it again. */
+  failed += !domain_roundtrip("block fold of a formal hcomp at the second sort composes at its own target",
+    "family Even := ez | es (oddPrev : Odd) and Odd := os (evenPrev : Even) | oloop (i : I) : Odd [ ~i -> os ez, i -> os ez ]\n",
+    "def oddHcomp : (o : Odd) -> Path (Fin 2) (fold Nat (Fin 2) 0 (fun (u : Fin 2) => 1) (fun (n : Nat) => 0) (fun (i : I) => 0) o) "
+    "(fold Nat (Fin 2) 0 (fun (u : Fin 2) => 1) (fun (n : Nat) => 0) (fun (i : I) => 0) o) := "
+    "fun (o : Odd) => fun (j : I) => fold Nat (Fin 2) 0 (fun (u : Fin 2) => 1) (fun (n : Nat) => 0) (fun (i : I) => 0) "
+    "(hcomp Odd (~j \\/ j) (fun (i : I) => [ ~j -> o, j -> o ]) o)\n");
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

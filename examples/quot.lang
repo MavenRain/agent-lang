@@ -42,3 +42,15 @@ def toTrunc3 : Trunc0 (Fin 4) := toTrunc (quot (Fin 4) Par 3)
 -- The fold of qPath is the constant path at trunc0 (Fin 4) 0.
 def toTruncPath : Path (Path (Trunc0 (Fin 4)) (trunc0 (Fin 4) 0) (trunc0 (Fin 4) 0))
   (fun (i : I) => toTrunc (quotEq (Fin 4) Par 0 2 refl i)) refl := refl
+-- The quotient of Fin 4 by the path relation Eq4 (S2 chunk C, the M7
+-- guest test). The fold of quotEq at a neutral interval has distinct
+-- ends: trunc0 a at i0 and trunc0 2 at i1. foldEqAt1 documents the i1
+-- end, which reduces before the fold.
+def Eq4 : Fin 4 -> Fin 4 -> Type 0 := fun (a : Fin 4) (b : Fin 4) => Path (Fin 4) a b
+def toTruncEq : Quot (Fin 4) Eq4 -> Trunc0 (Fin 4) :=
+  fun (z : Quot (Fin 4) Eq4) => fold (fun (a : Fin 4) => trunc0 (Fin 4) a)
+    (fun (a : Fin 4) (b : Fin 4) (r : Path (Fin 4) a b) => fun (i : I) => trunc0 (Fin 4) (r @ i))
+    (fun (x : Trunc0 (Fin 4)) (y : Trunc0 (Fin 4)) (p : Path (Trunc0 (Fin 4)) x y) (q : Path (Trunc0 (Fin 4)) x y) => fun (i : I) => fun (j : I) => squash0 (Fin 4) x y p q i j) z
+def foldEqAt : (a : Fin 4) -> (r : Path (Fin 4) a 2) -> Path (Trunc0 (Fin 4)) (trunc0 (Fin 4) a) (trunc0 (Fin 4) 2) :=
+  fun (a : Fin 4) (r : Path (Fin 4) a 2) => fun (i : I) => toTruncEq (quotEq (Fin 4) Eq4 a 2 r i)
+def foldEqAt1 : (a : Fin 4) -> (r : Path (Fin 4) a 2) -> Path (Trunc0 (Fin 4)) (foldEqAt a r @ i1) (trunc0 (Fin 4) 2) := fun (a : Fin 4) (r : Path (Fin 4) a 2) => refl

@@ -256,3 +256,108 @@ Deviations:
 - The orbit test texts use `Nat` for `Size` and for `Unit`, `0` for
   `sz0` and for `unit`, and `succ` for `szS`. Fresh names (Vx, Nx,
   Even/Odd, Boxx/Itm, Lx/Rx) stand beside the domain names.
+
+### Chunk C: examples, evals, goldens, the M7 test and the mutant run
+
+Chunk C adds the S2 guest tests: three examples, the M7 defs in
+`examples/quot.lang`, 13 eval rows, 3 JSON goldens, 2 path regression
+cases, the `## S2 shapes` section of `formers/tcc-json.md` and the PLAN
+section 8 row. It changes no source file beyond HEAD b11f1cb.
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 23 checked, 0 failed | 20 -> 23 |
+| parse refusals | 11 | none |
+| check refusals | 67 | none |
+| evals | 61 | 48 -> 61 |
+| json builds | 23 | 20 -> 23 |
+| build refusals | 3 | none |
+| regressions | 6 | none |
+| printer regressions | 2 | none |
+| path regressions | 111 checked, 0 failed | 109 -> 111 (deviation 6: 93 -> 109 in HEAD) |
+
+Examples:
+- `examples/indexed.lang`: `Vec (Fin 2)` with `vswap`. `vecCount` folds
+  into Nat, `vecSwapPath` is the vswap line from `vecTwo` to `vecSwapped`.
+- `examples/mutual.lang`: the `Charter R` and `Ratified R` block.
+  `adopted` is the block fold at Charter, `ratifiedRule` the same fold at
+  Ratified, `ratifiedOne` a refl check.
+- `examples/elim.lang`: `toTruncE` (a Quot elim into Trunc0), `vecMapE`
+  (a dependent motive), `vecSwapE`, `swapAt0`, `swapAt1`, `vecCountE`,
+  `vecIdE`, `vecIdPathE` (a path motive, the vswap square) and `hcompE`
+  (the elim of a formal hcomp stays stuck).
+- `examples/quot.lang` (the M7 guest test): `Eq4`, `toTruncEq`,
+  `foldEqAt` and `foldEqAt1`.
+
+Eval rows (`test/eval/expect.txt`, 13): `indexed vecTwoCount` 2,
+`vecSwappedCount` 2; `mutual adoptedZero` 0, `adoptedOne` 7, `adoptedLaw`
+7; `elim vecTwoCountE` 2, `vecTwo`, `swapAt0`, `swapAt1`, `vecSwapE` (the
+vswap line), `quotThreeE` (`trunc0 (Fin 4) 2`), `quotEqAtE` (a constant
+line) and `hcompE` (a stuck elim of a formal hcomp).
+
+Path regression cases (test/path-regressions.c, cases 110 and 111):
+1. `cong at i1 of a fold with a neutral path case reads the i1 end`: the
+   M7 kill. `foldG` folds a Quot at a lambda-bound path case `g`; a cong
+   line of `foldG g (quotEq ... a 2 r i)` at i1 is `trunc0 (Fin 4) 2`.
+   Reader: `rule_cong` quotes the PAPP ends, the CORE_PAPP eval applies
+   the path at i1, and the `path_apply` end rule returns the i1 end.
+2. `block fold of a formal hcomp at the second sort composes at its own
+   target`: the N4 kill. Even/Odd with the path constructor `oloop` on
+   Odd, the targets Nat and `Fin 2`; a round trip of the fold of a formal
+   hcomp at a lambda-bound `o : Odd` prints the hcomp type and checks it
+   again.
+
+Mutants (`S2-C-mutants.sh`, 13 edits, each `sd -F`, `make -B check`, a
+`git checkout` restore that `shasum` confirms; the runner printed
+`mutants: 13 run, 12 killed, 1 survived`, then case 111 killed N4 on a
+hand run):
+
+| Id | Site and edit | Result |
+|---|---|---|
+| N1 | `src/front/check.c` `branch_index`, `t->inst == fam` to `t->inst != fam` (1 of 1) | KILLED: `indexed family: an end at another index: expected HIT_INDEX` (TYPE_MISMATCH instead) |
+| N2 | `src/front/check.c` `header_order`, `if (named)` to `if (named < 0)` (1 of 1) | KILLED: `block: a header names a later sort: expected BLOCK_ORDER` (REFUSE_REC instead) |
+| N3 | `src/front/eval.c` `fold_family`, a recursive field folds at `family`, not at `field_sort` (1 of 1) | KILLED: `examples/mutual.lang` `ratifiedOne` INTERNAL, a fold of a constructor of another family |
+| N4 | `src/front/eval.c` `fold_res`, the target of a block sort is always the first target (1 of 1) | SURVIVED the 110 cases; KILLED by case 111 (+1): the replay `TYPE_MISMATCH: expected a term of type Nat, found a term of type Fin 2` |
+| N5 | `src/front/check.c` `elim_res`, the case result is the motive at the scrutinee type `st` (1 of 1) | KILLED: `examples/elim.lang` `vecMapE` TYPE_MISMATCH, expected `Vec B n`, found `Vec B 0` |
+| N6 | `src/front/eval.c` `elim_family`, `elim_path` only on a NULL acc, else `stuck_elim` (1 of 1) | KILLED: `examples/elim.lang` `vecIdPathE` FIN_CASE at the case 0 of Fin 2, wrapping PATH_END |
+| M7 | `src/front/eval.c` `fold_path`, the stored end `val_iend(m, side)` to `val_iend(m, 0)` (1 of 1) | KILLED by case 110: `atEnd` FIN_CASE, TYPE_MISMATCH `trunc0 (Fin 4) 2` against `trunc0 (Fin 4) 0` |
+| M1w | `src/front/eval.c` CLOS_SIGMA_DOM, `ival_join(m, phi, ival_neg(m, r))` to `ival_join(m, phi, r)` (1 of 4) | KILLED: `examples/kan.lang` `transportSigma` PATH_END at i1 |
+| M2w | `src/front/eval.c` `fold_path`, `ends[side]` to `ends[1 - side]` (1 of 2; `fold_square` is site 2) | KILLED by case 110, the same observation as M7 |
+| M3w | `src/front/eval.c` transp rule 1, the end test 1 to 0 for a constructor base only (2 of 3; the plain flip dies at domain load, `JRefl`) | KILLED: `examples/trunc.lang` `truncUa` PATH_END at i1 |
+| M4w | `src/front/eval.c` hcomp rule 1, the end test 1 to 0 at a family type only (2 of 2; the plain flip dies at domain load, `trans`) | KILLED: `examples/circle.lang` `loop2` PATH_END at i0; also `elim.lang` `hcompE`, `trunc.lang` `truncHcomp` |
+| M5w | `src/front/eval.c` `reduce_glue_elem`, `glue_true` to `!glue_true` (1 of 2) | KILLED: `examples/circle.lang` `loopT` PATH_END at i1; also `uaBetaPlus3`, `truncUa` |
+| M6w | `domain/domain.lang` `finSub`, `finAdd n a (finNeg n b)` to `finAdd n a b` (1 of 1) | KILLED: `examples/fin.lang` `subAt` PATH_END, 7 for 8 |
+
+Every kill comes from a guest test or a path regression, so the S1 open
+item (M1 to M6 died at domain load) is closed by the weaker sites M1w to
+M6w. M7, the S1 survivor, is killed by case 110.
+
+Deviations:
+1. Rule R9 refuses `(i : I) -> T` as a Pi type (INTERVAL_TYPE), so the
+   kickoff rows that bind an interval are Path types in the orbit shape:
+   `vecSwapE`, `swapAt0`, `swapAt1`, `quotEqAtE`, `foldEqAt` and
+   `foldEqAt1` (`foldEqAt a r @ i1`). The eval prints are unchanged.
+2. `vecIdPathE` (the path motive with the vswap square) passed on the
+   first attempt; no `s1IdPath` fallback.
+3. The JSON emitter `family_json` did not admit the indices of an indexed
+   family type; a one-line edit, now in HEAD through the USER commit.
+4. `examples/elim.lang` defines `vecXY`, `vecYX` and `r13 : Par 1 3`
+   beside the kickoff defs, for `hcompE` and the `vecSwapE` ends.
+5. `examples/mutual.lang` failed to build JSON (INTERNAL at `charterOne`):
+   the json.c `fi->recursive ? type : ...` field type gave the sibling
+   sort `Ratified` the `Charter` type. HEAD has the fix (`ft =
+   eval_core(...)` on every field); chunk C only regenerated
+   `test/json/mutual.json` (470 bytes).
+6. The chunk C precondition differed: HEAD b11f1cb is the USER commit of
+   chunk B with review fixes beyond the staged tree 0451fd14 (check.c
+   +113, eval.c 2, json.c 7, and 16 path regression cases, 93 -> 109).
+7. Only a cong line kills M7: `conv_loop` ignores the stored ends, the
+   printer prints `dom @ arg`, JSON refuses stuck terms, and `val_isubst`
+   rebuilds the PAPP without `path_apply`. `json_contains` and a round
+   trip cannot kill it.
+8. The N4 killer needs a path constructor on the second sort and a round
+   trip. `hcomp_data` sends a family without path constructors to
+   `hcomp_stuck`, a fold of that neutral is a `stuck_fold` whose RES the
+   printer omits, and only `fold_hcomp` reads `fold_res` in an observable
+   way (the hcomp type). A first attempt without `oloop` survived. The
+   domain has no `Unit`, so the two targets are Nat and `Fin 2`.

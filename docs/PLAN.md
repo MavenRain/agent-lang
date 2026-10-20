@@ -210,7 +210,7 @@ document of the instances; it becomes `langc json` and stays as a test aid
 |---|---|
 | S0 | This seed: the kit, the design, this plan. |
 | S1 | The coin-lang kernel port (section 4). Remove the coin domain. DONE 2026-10-19: rulings K1 to K7 = (a), Fin admitted; `docs/STATUS.md`, section S1. |
-| S2 | The orbit-lang indexed families, mutual blocks and dependent eliminator: QIITs and HIITs. |
+| S2 | The orbit-lang indexed families, mutual blocks and dependent eliminator: QIITs and HIITs. DONE 2026-10-19: rulings Q1 to Q9 = (a); `docs/STATUS.md`, section S2. |
 | S3 | The base span: remove the kit sample types that the request does not give, add `Text`, `Int64`, `Nat` (no bound), `Json` and `Log` with the section 5 operations. |
 | S4 | Coinductive families: guarded `unfold`, lazy `out` (O4). |
 | S5 | `IO`, the operation signature, `langc build` with libtcc, and the terminal operations 11 to 13. |
