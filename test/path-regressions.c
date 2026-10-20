@@ -1013,6 +1013,17 @@ int main(void) {
     "def moved : (A : Type 0) -> (B : Type 0) -> Path (Type 0) A B -> Stream A -> Stream B := "
     "fun (A : Type 0) (B : Type 0) (p : Path (Type 0) A B) (s : Stream A) => transp (fun (i : I) => Stream (p @ i)) i0 s\n");
   failed += !out_fuel();
+  /* S4 chunk C: refl after eval. */
+  failed += !accepts("unfold: refl of two unfolds after a take",
+    "def zerosA : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat 0 n) 0\n"
+    "def zerosB : Stream Nat := unfold (fun (n : Nat) => scons Nat Nat 0 (succ n)) 0\n"
+    "def take : Nat -> Stream Nat -> List Nat := fun (n : Nat) => fold "
+    "(fun (rest : Stream Nat -> List Nat) (s : Stream Nat) => fold (fun (h : Nat) (t : Stream Nat) => cons h (rest t)) (out s)) "
+    "(fun (s : Stream Nat) => nil) n\n"
+    "def same : Path (List Nat) (take 3 zerosA) (take 3 zerosB) := refl\n");
+  failed += !domain_refuses("unfold: refl of g at 0 and g at 1 after eval", "",
+    "def g : Nat -> StreamF Nat Nat := fun (n : Nat) => scons Nat Nat n (succ n)\n"
+    "def bad : Path (Stream Nat) (unfold g (natSub 1 1)) (unfold g (natAdd 0 1)) := refl\n", "PATH_END");
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

@@ -100,6 +100,10 @@ loop (sessions 2 to 4).
 - Chunk C changed `refute_core` from `Fin 0` to `Empty` (K2 on the eval
   side): the path regression `decEqFin inr round-trips` caught the
   mismatch with the check side.
+- S4 chunk C: the printer drops a typed identity in the body of an
+  `unfold` step. The printed form of `colist.lang` `three` does not check
+  again (`TYPE_INFER: nil needs a declared type List A`), thus `three` has
+  no eval row.
 
 ### Review fixes
 
@@ -702,3 +706,99 @@ Deviations:
   at the seed of the tail. The second `out` gives a layer with K + A + 1
   fuel and stops with `EVAL_FUEL` at K + A. A scratch copy of eval.c without
   the spend (kickoff mutant M2) fails this case and only this case.
+
+### Chunk C: examples, goldens, path regressions and mutants
+
+Chunk C adds the S4 guest tests, the mutant run and the docs. It changes
+no source file beyond HEAD 95ceac6. `examples/stream.lang` (10 eval rows),
+`examples/colist.lang` (8 eval rows) and `examples/mealy.lang` (6 eval
+rows) are new, with the goldens `test/json/stream.json`,
+`test/json/colist.json` and `test/json/mealy.json`. `stream.lang` makes
+`nats` by `unfold` and reads it with `headS`, `tailS`, `take` and `nth`.
+`mapS` and `zipS` make a new stream by `unfold`, with the old stream as the
+seed. `colist.lang` makes a finite colist from a `List` (`fromList`, a fold
+that keeps the tail as the seed) and an infinite colist (`upFrom`).
+`takeC` stops at the end of a finite colist. `mealy.lang` gives the machine
+`counter` and runs it on a `List` of inputs (`run`, `final`). The last def
+of each example is a `refl` that needs the `out` step. `langc eval` gave
+each eval row before the row went into `test/eval/expect.txt`. The two new
+path regressions are a `refl` of two unfolds after a `take` (`zerosA` and
+`zerosB` of `codata-bisim.lang`, 3 entries: accepted) and a `refl` of
+`unfold g` at the seeds `natSub 1 1` and `natAdd 0 1` (`PATH_END`). Each
+new path regression failed one time in a scratch copy with a bad
+expectation. README.md gives the coalgebras, and the PLAN section 8 row S4
+is DONE.
+
+| Suite | Count | Change |
+|---|---|---|
+| examples | 31 | +3 (`stream.lang`, `colist.lang`, `mealy.lang`) |
+| parse refusals | 14 | 0 |
+| check refusals | 78 | 0 |
+| evals | 151 | +24 (10 stream, 8 colist and 6 mealy rows) |
+| json goldens | 31 | +3 (`stream.json`, `colist.json`, `mealy.json`) |
+| build refusals | 4 | 0 |
+| regressions | 6 | 0 |
+| printer regressions | 2 | 0 |
+| path regressions | 173 | +2 (a `refl` of two unfolds after a `take`, a `refl` of g at 0 and g at 1 after eval) |
+
+Mutants (`S4-C-mutants.sh`, outside the repo, 13 edits; each edit is a
+Python string replace that must apply one time, then `make -B check`, then
+a `git checkout` restore that `shasum` confirms). The results file gives
+`mutants: 13 run, 13 killed, 0 survived`, with M10 from a rerun
+(deviations below). The gate stops make at `test/gate.sh` when an example,
+an eval row or a golden fails, thus a mutant that fails a guest test does
+not reach the path regressions. The killer column gives the first FAIL
+line. For M9, M11 and M13 the kickoff killer did not kill the mutant or
+was not reached (deviations below).
+
+| Id | File | Edit | Killer | Result |
+|---|---|---|---|---|
+| M1 | `src/front/eval.c` | `out_field`, X field: the layer keeps the old seed (`unfold g s`, not `unfold g v`) | `examples/colist.lang` `toEnd`: PATH_END | KILLED |
+| M2 | `src/front/eval.c` | `reduce_out`: no fuel spend before `g s` | path regression `out_fuel` ("the second out traps when the fuel is 1 step short") | KILLED |
+| M3 | `src/front/eval.c` | `out_field`, Pi chain field: `unfold g f`, not `fun r => unfold g (f r)` | `examples/mealy.lang` `runAgrees`: INTERNAL (an application of a value that is not a function) | KILLED |
+| M4 | `src/front/eval.c` | `out_field`, field without X: the field changes as an X field | `examples/colist.lang` `toEnd`: PATH_END | KILLED |
+| M5 | `src/front/eval.c` | conversion of two unfolds: compare the seeds only | check `codata-bisim.lang`: exit 0 for PATH_END | KILLED |
+| M6 | `src/front/eval.c` | conversion of two unfolds: compare the steps only | path regression "unfold: refl of g at 0 and g at 1 after eval": no PATH_END | KILLED |
+| M7 | `src/front/check.c` | `check_cofamily`: accept X in the domain of a Pi field | path regression "cofamily: X in the domain of a Pi field": no CODATA_POSITIVE | KILLED |
+| M8 | `src/front/check.c` | `check_cofamily`: accept an indexed layer | path regression "cofamily: an indexed layer": no CODATA_FORM | KILLED |
+| M9 | `src/front/check.c` | `rule_out`: `out x` has the type `C ps`, not `F ps (C ps)` | `examples/colist.lang` `takeC`: CODATA_FOLD | KILLED |
+| M10 | `src/front/check.c` | `fold_family`: the cofamily test is `f->cofamily && f->ctor_count > 4096u` (false for each domain cofamily) | check `codata-fold.lang`: TYPE_NOT_FUNCTION for CODATA_FOLD | KILLED |
+| M11 | `src/front/check.c` | `rule_unfold`, cofamily form: check g at `S -> C ps`, not `S -> F ps S` | `examples/colist.lang` `fromList`: TYPE_MISMATCH | KILLED |
+| M12 | `src/json.c` | an instance that holds a cofamily value goes out as `null` | build refusal `codata.lang`: exit 0 for JSON_VALUE | KILLED |
+| M13 | `src/front/eval.c` | printer: `unfold` prints the seed before the step | eval `stream nats` | KILLED |
+
+Deviations:
+
+- The 5 entries with arguments (`nth`, `nthDoubled`, `countThree`,
+  `startAt`, `afterOne`) give a `Nat`. `entry_of` needs a first-order
+  result, and a `List` result is not one (`EVAL_ARGS`, "not an entry").
+- `stream.lang` has no row `outNats`. A def at `StreamF Nat (Stream Nat)`
+  holds a stream, thus `langc build` refuses it (`JSON_VALUE`, Q7). The row
+  `nthDoubled 7 => 14` is in its place. `colist.lang` `outEmpty` (`cnil`)
+  holds no colist, thus it builds.
+- `colist.lang` has no eval row for `three`. Its printed form does not
+  check again (`TYPE_INFER: nil needs a declared type List A`): the readback
+  of the step body drops the typed identity `(fun (z : List Nat) => z) nil`
+  of the source. The printer puts typed identities only at seeds and at
+  coiterations. This limit is older than chunk C, and chunk C does not fix
+  it (section S1, `### Carry-over items`).
+- Kickoff M5 input: `zerosA` and `zerosB` of `codata-bisim.lang` give the
+  same 5 entries by `take` (each is `cons 0 (... nil)`), and a `refl` of the
+  two lists accepts. The first new path regression keeps this fact at 3
+  entries.
+- The gate stops make at `test/gate.sh`. M9 and M13 fail an example or an
+  eval row, thus the run does not reach their kickoff killers (the path
+  regressions of the `out` type and of the unfold round trip).
+- M11: the kickoff killer `codata-step.lang` does not kill it. Under the
+  mutant, the def `nats` of that file fails first with the same
+  `TYPE_MISMATCH`, thus the check row passes.
+- M10: the run 1 edit `!f->cofamily` stopped at the compiler warning
+  `-Wtautological-compare`, not at a guest test. The edit is now
+  `f->cofamily && f->ctor_count > 4096u`, and the rerun killed it.
+- Edit sites: M1 edits `out_field` (`counfold_at(m, u, u->args[1])`), not
+  `counfold_at`, because the Pi chain path also calls `counfold_at`. M3
+  puts `counfold_at(m, u, v)` in place of the `CLOS_OUT_PI` closure. M5
+  and M6 add an `OP_COUNFOLD` test before the argument loop of the `VAL_OP`
+  arm of the conversion: the conversion has no `unfold` arm of its own. M7
+  adds `&& t->kind != CORE_PI`, which is false in the loop. M12 gives
+  `put_text(o, "null")`.

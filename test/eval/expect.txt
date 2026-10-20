@@ -125,3 +125,27 @@ json underNumber => inr (jnum (inr "-9223372036854775809"))
 text tailAcute => 0
 nat bigLessSame => 0
 nat bigLeSame => 1
+stream nats => unfold (fun n => scons Nat Nat n (succ n)) ((fun (_case0 : Nat) => _case0) (0))
+stream headNats => 0
+stream thirdNat => 2
+stream takeThree => cons 0 (cons 1 (cons 2 nil))
+stream nth 0 => 0
+stream nth 5 => 5
+stream doubled => cons 0 (cons 2 (cons 4 (cons 6 nil)))
+stream zipped => cons (pair 0 1) (cons (pair 1 2) (cons (pair 2 3) nil))
+stream nthDoubled 7 => 14
+stream takeAgrees => fun _ => cons 1 (cons 2 nil)
+colist takeTwo => cons 7 (cons 8 nil)
+colist takeNine => cons 7 (cons 8 (cons 9 nil))
+colist takeUp => cons 5 (cons 6 (cons 7 nil))
+colist countThree 2 => 2
+colist countThree 9 => 3
+colist takeEmpty => nil
+colist outEmpty => cnil Nat (Colist Nat)
+colist toEnd => fun _ => cons 7 (cons 8 (cons 9 nil))
+mealy counter => fun n => unfold (fun k => mealy Nat Nat Nat k (fun i => natAdd k i)) ((fun (_case0 : Nat) => _case0) (n))
+mealy runCounter => cons 0 (cons 3 (cons 7 nil))
+mealy finalCounter => 12
+mealy startAt 6 => 6
+mealy afterOne 5 => 15
+mealy runAgrees => fun _ => 12

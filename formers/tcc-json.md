@@ -17,7 +17,7 @@ binder scope and domain declarations.
 | F4 | List | DONE: `nil`, `cons`; `examples/formers.lang`, `examples/inventory.lang` |
 | F5 | Monad pure/map/bind | DONE over Option, Sum E and List: `examples/monad.lang`, `examples/laws.lang` |
 | F6 | Algebra fold | DONE over Nat, List and each family: `examples/algebra.lang`, `examples/entries.lang` |
-| F7 | Algebra unfold | DONE into List with a Nat step limit: `examples/algebra.lang` |
+| F7 | Algebra unfold | DONE into List with a Nat step limit: `examples/algebra.lang`. DONE at a cofamily (S4): `unfold g s` takes 2 arguments, and `out` gives the layer `F ps (C ps)`: `examples/stream.lang`, `examples/colist.lang`, `examples/mealy.lang`. A def at a cofamily type is not in the JSON document. An instance that holds a cofamily value stops the build with JSON_VALUE: `test/emit/codata.lang` (`## S4 shapes`) |
 | F8 | Filter | DONE over Option and List: `examples/monad.lang`, `domain/domain.lang` |
 | F9 | Non-dependent Pi | DONE: `examples/functions.lang` |
 | F10 | Dependent Pi | DONE: `examples/functions.lang`, `examples/universes.lang` |

@@ -16,6 +16,14 @@ bytes. An `Int64` wraps. A `Nat` has no bound. `Json` is the domain tree
 that `jsonParse` and `jsonRender` read and write. A `Log` is a snoc list
 of `Json` (`logEmpty`, `logAppend`).
 
+Coalgebras (S4, `docs/STATUS.md`, section S4): the domain gives the
+cofamilies `Stream A`, `Colist A` and `Mealy I O`. `unfold g s` makes a
+value from the step `g` and the seed `s`, and `out` gives one layer. A
+stream gives a head and a tail, a colist can stop, and a Mealy machine
+gives an output and the next machine for each input. Each `out` applies
+`g` one time. There is no path from a bisimulation (Q5): two unfolds are
+equal only when their steps and their seeds are equal.
+
 - `SPEC.md`: the specification. Fill each section.
 - `design/DESIGN.md`: the domain design. It is the only source of the core
   types and the core operations.
