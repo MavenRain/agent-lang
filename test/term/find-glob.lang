@@ -1,0 +1,3 @@
+-- Writes the find response of its own tree for the glob *.c (S6a): the
+-- paths sorted, and no walk into the link to sub.
+def main : IO Unit := bind (find "build/fs/term/find-glob" "*.c") (fun (r : Sum Text Json) => write (textAppend (either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r) "\n"))

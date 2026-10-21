@@ -1,0 +1,3 @@
+-- Writes the listDir response of its own tree (S6a): the names sorted,
+-- each kind from lstat (the link l is a link).
+def main : IO Unit := bind (listDir "build/fs/term/list-dir") (fun (r : Sum Text Json) => write (textAppend (either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r) "\n"))

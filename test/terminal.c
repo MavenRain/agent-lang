@@ -7,9 +7,12 @@
    standard error must start with its text. A code gives a refusal
    fixture: langc builds into build/term/none/NAME, a directory that does
    not exist, and must exit 1 with "langc: CODE: " at the start of the
-   standard error. The runner writes only under build/term/. */
+   standard error. An fs row (S6a) first gets its own tree under
+   build/fs/term/NAME from the table fs_items. The runner writes only under
+   build/term/ and build/fs/term/. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -17,6 +20,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 extern char **environ;
 
@@ -61,6 +65,80 @@ static long slurp(const char *path, char *buf, size_t cap) {
 static int exists(const char *path) {
   struct stat info;
   return stat(path, &info) == 0;
+}
+
+/* The fs rows (S6a) and their trees. Each row gets its own directory
+   build/fs/term/NAME. Each item is a directory, a file with LEN bytes of
+   TEXT or a link to TEXT, at PATH under that directory. A directory comes
+   before its items. */
+typedef enum { FS_DIR, FS_FILE, FS_LINK } FsKind;
+
+typedef struct {
+  const char *row;
+  FsKind kind;
+  const char *path;
+  const char *text;
+  size_t len;
+} FsItem;
+
+static const char *const fs_rows[] = {"disk-usage", "find-glob", "list-dir", "read-file", "search-text"};
+
+static const FsItem fs_items[] = {
+  {"list-dir", FS_FILE, "b.txt", "b\n", 2},
+  {"list-dir", FS_FILE, "a.txt", "a\n", 2},
+  {"list-dir", FS_DIR, "sub", NULL, 0},
+  {"list-dir", FS_LINK, "l", "a.txt", 0},
+  {"find-glob", FS_FILE, "a.c", "", 0},
+  {"find-glob", FS_FILE, "b.h", "", 0},
+  {"find-glob", FS_DIR, "sub", NULL, 0},
+  {"find-glob", FS_FILE, "sub/c.c", "", 0},
+  {"find-glob", FS_DIR, "sub/deep", NULL, 0},
+  {"find-glob", FS_FILE, "sub/deep/d.c", "", 0},
+  {"find-glob", FS_LINK, "link", "sub", 0},
+  {"read-file", FS_FILE, "note.txt", "line one\nline two\n", 18},
+  {"search-text", FS_FILE, "a.txt", "one apple\ntwo\n", 14},
+  {"search-text", FS_FILE, "b.txt", "apple pie", 9},
+  {"search-text", FS_FILE, "bin.dat", "apple\0x\n", 8},
+};
+
+/* Makes build/fs/term/NAME and its items when NAME is an fs row. Returns 0
+   and writes a FAIL line if a step fails, else 1. */
+static int fs_tree(const char *name) {
+  char path[PATH_BYTES];
+  size_t i;
+  int row = 0;
+  for (i = 0; i < sizeof fs_rows / sizeof fs_rows[0]; i++) row = row || strcmp(fs_rows[i], name) == 0;
+  if (!row) return 1;
+  snprintf(path, sizeof path, "build/fs/term/%s", name);
+  if (mkdir(path, 0755) != 0) {
+    printf("FAIL terminal %s: cannot make %s\n", name, path);
+    return 0;
+  }
+  for (i = 0; i < sizeof fs_items / sizeof fs_items[0]; i++) {
+    const FsItem *item = &fs_items[i];
+    FILE *file;
+    int ok = 0;
+    if (strcmp(item->row, name) != 0) continue;
+    snprintf(path, sizeof path, "build/fs/term/%s/%s", name, item->path);
+    switch (item->kind) {
+    case FS_DIR:
+      ok = mkdir(path, 0755) == 0;
+      break;
+    case FS_LINK:
+      ok = symlink(item->text, path) == 0;
+      break;
+    case FS_FILE:
+      file = fopen(path, "wb");
+      ok = file != NULL && fwrite(item->text, 1, item->len, file) == item->len;
+      ok = file != NULL && fclose(file) == 0 && ok;
+      break;
+    }
+    if (!ok) {
+      printf("FAIL terminal %s: cannot make %s\n", name, path);
+      return 0;
+    }
+  }
+  return 1;
 }
 
 static int by_name(const void *a, const void *b) {
@@ -179,11 +257,17 @@ int main(void) {
   static char code[NAME_BYTES];
   char path[PATH_BYTES];
   char *clean[] = {"/bin/rm", "-rf", "build/term", NULL};
+  char *clean_fs[] = {"/bin/rm", "-rf", "build/fs/term", NULL};
   int count;
   int failed = 0;
   int i;
   if (run(clean, "/dev/null", "/dev/null", "/dev/null") != 0 || mkdir("build/term", 0755) != 0) {
     printf("FAIL terminal: cannot make build/term\n");
+    return 1;
+  }
+  if (run(clean_fs, "/dev/null", "/dev/null", "/dev/null") != 0 || (mkdir("build/fs", 0755) != 0 && errno != EEXIST)
+      || mkdir("build/fs/term", 0755) != 0) {
+    printf("FAIL terminal: cannot make build/fs/term\n");
     return 1;
   }
   count = fixtures();
@@ -200,7 +284,7 @@ int main(void) {
       printf("FAIL terminal %s: no %s\n", names[i], path);
       failed++;
     } else if (code[0] >= '0' && code[0] <= '9') {
-      failed += !run_fixture(names[i], atoi(code));
+      failed += !fs_tree(names[i]) || !run_fixture(names[i], atoi(code));
     } else {
       failed += !refusal_fixture(names[i], code);
     }

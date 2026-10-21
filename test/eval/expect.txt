@@ -166,3 +166,7 @@ io findTrace => "[\"find\",\"d\",\"*.lang\",\"tau\",\"[]\",\"ret\"]"
 io readFileTrace => "[\"readFile\",\"d/a.txt\",\"tau\",\"text\",\"ret\"]"
 io searchTrace => "[\"search\",\"d\",\"needle\",\"tau\",\"[]\",\"ret\"]"
 io diskUsageTrace => "[\"diskUsage\",\"d\",\"tau\",\"{}\",\"ret\"]"
+fs listNames => cons "a.txt" (cons "sub" nil)
+fs foundPaths => cons "d/a.c" (cons "d/sub/b.c" nil)
+fs hitLines => cons "one apple" (cons "apple pie" nil)
+fs usageTotal => some (inl 494384795648)

@@ -1,0 +1,6 @@
+-- Writes the key names of the diskUsage response of its own tree (S6a).
+-- The values change with the machine, thus the row shows the keys only.
+def keys : Json -> Json :=
+  fun (j : Json) => jarr (fold JsonList Unit JsonList jlNil (fun (b : Bool) => jlNil) (fun (n : Sum Int64 Text) => jlNil) (fun (t : Text) => jlNil) (fun (l : Unit) => jlNil) (fun (f : JsonList) => f)
+    unit (fun (h : JsonList) (t : Unit) => unit) jlNil (fun (k : Text) (v : JsonList) (t : JsonList) => jlCons (jstr k) t) j)
+def main : IO Unit := bind (diskUsage "build/fs/term/disk-usage") (fun (r : Sum Text Json) => write (textAppend (either (fun (e : Text) => e) (fun (j : Json) => jsonRender (keys j)) r) "\n"))

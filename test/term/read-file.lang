@@ -1,0 +1,2 @@
+-- Writes the readFile response of its own tree (S6a): the bytes of the file.
+def main : IO Unit := bind (readFile "build/fs/term/read-file/note.txt") (fun (r : Sum Text Text) => write (either (fun (e : Text) => e) (fun (t : Text) => t) r))

@@ -1284,3 +1284,63 @@ the ENOTDIR fallback described in D7 and D9. Four new rows failed before
 the fix. Eight added rows cover root links, trailing slashes, a dangling
 link and readFile following a link. After the fix, `make check` passes,
 including 239 path regressions and 12 terminal rows.
+
+### Chunk C:  examples, terminal rows, mutants and docs
+
+Chunk C adds examples/fs.lang, 5 fs terminal rows and the mutants M3 to
+M7. driver.c does not change. examples/fs.lang has closed functions over
+sample responses in the form that the driver gives:  `itemsOf`,
+`fieldOf`, `textOf` and `numberOf` (block folds over Json), then `names`
+(listDir), `paths` (find), `hitTexts` (search) and `total` (diskUsage).
+No IO runs:  the gate evaluates 4 defs. test/terminal.c adds the tables
+`fs_rows` and `fs_items` and the helper `fs_tree`. Each fs row gets its
+own tree under build/fs/term/NAME before the spawn. The runner removes
+build/fs/term at the start. The rows list-dir, find-glob, read-file,
+search-text and disk-usage each write the response (disk-usage writes
+the key names only).
+
+| Suite | Count |
+|---|---|
+| examples | 33 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 84 |
+| evals | 172 |
+| json | 33 |
+| json refusals | 4 |
+| gate | 0 failures |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 239 checked, 0 failed |
+| terminal | 17 checked, 0 failed |
+
+Edit sites:
+
+- examples/fs.lang (new), test/json/fs.json (new), test/eval/expect.txt
+  (4 rows:  `listNames`, `foundPaths`, `hitLines`, `usageTotal`).
+- test/terminal.c:  the header comment, `FsKind`, `FsItem`, `fs_rows`,
+  `fs_items`, `fs_tree`, and in `main` the build/fs/term cleanup and the
+  `fs_tree` call before `run_fixture`.
+- test/term:  list-dir, find-glob, read-file, search-text and disk-usage
+  (each `.lang`, `.code` and `.out`).
+
+| Id | Deviation |
+|---|---|
+| D14 | HEAD is 638f37c, the USER commit of chunk B with the review fix (tree 54b7173d, not the staged tree 266705ee). The path regressions are 239, not 231. The chunk C gate target uses 239. The mutant sites moved:  M3 line 388, M4 line 364, M5 line 517, M6 line 572, M7 line 648. |
+| D15 | M5 uses `strnlen (bytes, len)` in place of `strlen (bytes)`. The `fs_read` buffer has no NUL after the bytes, thus `strlen` reads past the buffer for a file with no NUL byte. At the row the effect is the same:  the length stops at the first NUL byte. |
+| D16 | The first killer of M4 is `listDir sorted` (with `stat` the link `beta` gets the kind `file`), not `find link not walked`. listDir and find use the same `fs_entry`. `find link not walked` also fails under M4 (5 rows fail). |
+| D17 | The find-glob tree holds a link `link` to `sub`:  the output has no path under `link`. The search-text tree holds `bin.dat` with a NUL byte:  the output has no hit in it. |
+
+| Id | Mutant (driver.c) | First killer | Result |
+|---|---|---|---|
+| M3 | `fs_walk`:  the skip of `.` and `..` only when `deep` is not 0 | path regression `listDir sorted` (3 rows fail) | KILLED |
+| M4 | `fs_entry`:  `stat` in place of `lstat` | path regression `listDir sorted` (D16;  5 rows fail) | KILLED |
+| M5 | `read_file`:  the Text length from `strnlen` (D15) | path regression `readFile NUL` (1 row fails) | KILLED |
+| M6 | `search_text`:  no 8 KiB NUL test (`1 \|\| memchr`) | path regression `search binary` (1 row fails) | KILLED |
+| M7 | `disk_usage`:  `total` from `f_bsize` in place of `f_frsize` | path regression `diskUsage values` (2 rows fail) | KILLED |
+
+Each mutant ran after `git add`, with `make -B check`, and was restored
+with `git checkout -- src/runtime/driver.c`. `git diff --quiet` passed
+after each restore. Under M7 the total was 126562507685888 (256 times
+the real total:  `f_bsize` 1048576, `f_frsize` 4096).
+
+7 of 7 S6a mutants KILLED.

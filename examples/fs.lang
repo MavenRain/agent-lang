@@ -1,0 +1,52 @@
+-- Filesystem responses (S6a). Each def is a closed function over a response
+-- value of listDir, find, search or diskUsage, at a sample Json value in
+-- the form that the driver gives (the keys in the PLAN 6.2 order). No IO
+-- runs: the gate evaluates each def. A block fold over Json takes the 3
+-- targets (Json, JsonList, JsonFields), the 6 Json cases, the 2 JsonList
+-- cases and the 2 JsonFields cases, then the value. itemsOf gives the items
+-- of an array (nil for each other value). fieldOf k gives the value at the
+-- first key k of an object (jnull when no key is k). textOf gives the Text
+-- of a jstr ("" for each other value). numberOf gives the number of a jnum.
+def noJson : List Json := nil
+def noText : List Text := nil
+def itemsOf : Json -> List Json :=
+  fun (j : Json) => second (fold (Prod Json (List Json)) (Prod JsonList (List Json)) JsonFields
+    (pair jnull noJson) (fun (b : Bool) => pair (jbool b) noJson) (fun (n : Sum Int64 Text) => pair (jnum n) noJson) (fun (t : Text) => pair (jstr t) noJson)
+    (fun (l : Prod JsonList (List Json)) => pair (jarr (first l)) (second l)) (fun (f : JsonFields) => pair (jobj f) noJson)
+    (pair jlNil noJson) (fun (h : Prod Json (List Json)) (t : Prod JsonList (List Json)) => pair (jlCons (first h) (first t)) (cons (first h) (second t)))
+    jfNil (fun (k : Text) (v : Prod Json (List Json)) (t : JsonFields) => jfCons k (first v) t) j)
+def fieldOf : Text -> Json -> Json :=
+  fun (k : Text) (j : Json) => second (fold (Prod Json Json) JsonList (Prod JsonFields Json)
+    (pair jnull jnull) (fun (b : Bool) => pair (jbool b) jnull) (fun (n : Sum Int64 Text) => pair (jnum n) jnull) (fun (t : Text) => pair (jstr t) jnull)
+    (fun (l : JsonList) => pair (jarr l) jnull) (fun (f : Prod JsonFields Json) => pair (jobj (first f)) (second f))
+    jlNil (fun (h : Prod Json Json) (t : JsonList) => jlCons (first h) t)
+    (pair jfNil jnull) (fun (key : Text) (v : Prod Json Json) (t : Prod JsonFields Json) => pair (jfCons key (first v) (first t)) (boolIf Json (textEq key k) (first v) (second t))) j)
+def textOf : Json -> Text :=
+  fun (j : Json) => fold Text Unit Unit "" (fun (b : Bool) => "") (fun (n : Sum Int64 Text) => "") (fun (t : Text) => t) (fun (l : Unit) => "") (fun (f : Unit) => "")
+    unit (fun (h : Text) (t : Unit) => unit) unit (fun (k : Text) (v : Text) (t : Unit) => unit) j
+def noNumber : Option (Sum Int64 Text) := none
+def numberOf : Json -> Option (Sum Int64 Text) :=
+  fun (j : Json) => fold (Option (Sum Int64 Text)) Unit Unit noNumber (fun (b : Bool) => noNumber) (fun (n : Sum Int64 Text) => some n) (fun (t : Text) => noNumber) (fun (l : Unit) => noNumber) (fun (f : Unit) => noNumber)
+    unit (fun (h : Option (Sum Int64 Text)) (t : Unit) => unit) unit (fun (k : Text) (v : Option (Sum Int64 Text)) (t : Unit) => unit) j
+-- Each function gives nil (none for total) at an inl response.
+def names : Sum Text Json -> List Text :=
+  fun (r : Sum Text Json) => either (fun (e : Text) => noText) (fun (j : Json) => fold (fun (x : Json) (rest : List Text) => cons (textOf (fieldOf "name" x)) rest) noText (itemsOf j)) r
+def paths : Sum Text Json -> List Text :=
+  fun (r : Sum Text Json) => either (fun (e : Text) => noText) (fun (j : Json) => fold (fun (x : Json) (rest : List Text) => cons (textOf x) rest) noText (itemsOf j)) r
+def hitTexts : Sum Text Json -> List Text :=
+  fun (r : Sum Text Json) => either (fun (e : Text) => noText) (fun (j : Json) => fold (fun (x : Json) (rest : List Text) => cons (textOf (fieldOf "text" x)) rest) noText (itemsOf j)) r
+def total : Sum Text Json -> Option (Sum Int64 Text) :=
+  fun (r : Sum Text Json) => either (fun (e : Text) => noNumber) (fun (j : Json) => numberOf (fieldOf "total" j)) r
+-- The sample responses.
+def listing : Sum Text Json :=
+  inr (jarr (jlCons (jobj (jfCons "name" (jstr "a.txt") (jfCons "kind" (jstr "file") jfNil))) (jlCons (jobj (jfCons "name" (jstr "sub") (jfCons "kind" (jstr "dir") jfNil))) jlNil)))
+def found : Sum Text Json := inr (jarr (jlCons (jstr "d/a.c") (jlCons (jstr "d/sub/b.c") jlNil)))
+def hits : Sum Text Json :=
+  inr (jarr (jlCons (jobj (jfCons "path" (jstr "d/b.txt") (jfCons "line" (jnum (inl 1)) (jfCons "text" (jstr "one apple") jfNil))))
+    (jlCons (jobj (jfCons "path" (jstr "d/b.txt") (jfCons "line" (jnum (inl 3)) (jfCons "text" (jstr "apple pie") jfNil)))) jlNil)))
+def usage : Sum Text Json :=
+  inr (jobj (jfCons "total" (jnum (inl 494384795648)) (jfCons "free" (jnum (inl 120034304000)) (jfCons "available" (jnum (inl 120034304000)) jfNil))))
+def listNames : List Text := names listing
+def foundPaths : List Text := paths found
+def hitLines : List Text := hitTexts hits
+def usageTotal : Option (Sum Int64 Text) := total usage

@@ -1,0 +1,3 @@
+-- Writes the search response of its own tree for apple (S6a): the hits in
+-- path order, the binary file bin.dat skipped.
+def main : IO Unit := bind (search "build/fs/term/search-text" "apple") (fun (r : Sum Text Json) => write (textAppend (either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r) "\n"))
