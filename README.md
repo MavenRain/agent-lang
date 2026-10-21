@@ -40,6 +40,19 @@ BUILD_TCC. `langc json PROG [-o OUT]` writes the JSON document of the
 instances. `examples/io.lang` has an echo loop, a greeting from the
 arguments and a line counter.
 
+Filesystem reads (S6a, `docs/STATUS.md`, section S6a): a console program
+can use `listDir : Text -> IO (Sum Text Json)` (the names and the kinds
+in a directory), `find : Text -> Text -> IO (Sum Text Json)` (the paths
+under a root whose base name matches a glob),
+`readFile : Text -> IO (Sum Text Text)` (all the bytes of a file),
+`search : Text -> Text -> IO (Sum Text Json)` (each line that holds a
+fixed text) and `diskUsage : Text -> IO (Sum Text Json)` (the bytes of
+the filesystem, from `statvfs`). A walk does not follow a symbolic link.
+A failure is a value: `inl` of an error text. OS errors use
+`OP: PATH: TEXT`; input validation can omit the path.
+`examples/fs.lang` reads sample responses. `formers/tcc-json.md`,
+section `## S6 shapes`, gives the JSON forms.
+
 - `SPEC.md`: the specification. Fill each section.
 - `design/DESIGN.md`: the domain design. It is the only source of the core
   types and the core operations.

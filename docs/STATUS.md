@@ -1322,6 +1322,9 @@ Edit sites:
   `fs_tree` call before `run_fixture`.
 - test/term:  list-dir, find-glob, read-file, search-text and disk-usage
   (each `.lang`, `.code` and `.out`).
+- Docs:  docs/PLAN.md (the section 6.2 S6a note, the section 8 row S6a),
+  formers/FORMERS.md (F7 `IO A` and the matrix row F7), formers/tcc-json.md
+  (`## S6 shapes`) and README.md (the S6a paragraph).
 
 | Id | Deviation |
 |---|---|
@@ -1329,6 +1332,7 @@ Edit sites:
 | D15 | M5 uses `strnlen (bytes, len)` in place of `strlen (bytes)`. The `fs_read` buffer has no NUL after the bytes, thus `strlen` reads past the buffer for a file with no NUL byte. At the row the effect is the same:  the length stops at the first NUL byte. |
 | D16 | The first killer of M4 is `listDir sorted` (with `stat` the link `beta` gets the kind `file`), not `find link not walked`. listDir and find use the same `fs_entry`. `find link not walked` also fails under M4 (5 rows fail). |
 | D17 | The find-glob tree holds a link `link` to `sub`:  the output has no path under `link`. The search-text tree holds `bin.dat` with a NUL byte:  the output has no hit in it. |
+| D18 | The docs session started on a3b31e0, the USER commit of the chunk C code (tree 2590793a, the staged tree of session 1), not on 638f37c. The docs are a separate change on a3b31e0 (USER ruling 2026-10-21). |
 
 | Id | Mutant (driver.c) | First killer | Result |
 |---|---|---|---|

@@ -121,3 +121,38 @@ values: `noText`, `lines`, the 8 trace texts and the 4 Option values. The
 IO defs and the functions are not in it. The kit `build` verb is now
 `langc json PROG [-o OUT]` (O20 (a)). `langc build PROG -o OUT` writes a
 console program (`docs/PLAN.md`, section 7).
+
+## S6 shapes: filesystem responses
+
+S6a adds no instance shape. The IO rule of S5 applies: a def at an IO
+type is not in the document. The golden `test/json/fs.json` of
+`examples/fs.lang` holds only closed values. At run time the driver gives
+each response as a domain value of `Sum Text Json` or `Sum Text Text`.
+The `inr` values have these forms (`jsonRender` renders the Json
+payloads; readFile returns Text directly):
+
+- listDir: `inr` of an array of `{"name","kind"}`, sorted by the name in
+  byte order, without `.` and `..`. The kind is `file`, `dir`, `link` or
+  `other` (from `lstat`), for example
+  `[{"name":"a.txt","kind":"file"},{"name":"l","kind":"link"},{"name":"sub","kind":"dir"}]`.
+- find: `inr` of an array of path texts, sorted in byte order. A path is
+  the root, a `/`, then the path under the root, for example
+  `["build/fs/term/find-glob/a.c","build/fs/term/find-glob/sub/c.c"]`.
+- readFile: `inr` of the Text with all the bytes of the file. A NUL byte
+  stays in the Text.
+- search: `inr` of an array of `{"path","line","text"}`, sorted by the
+  path, then by the line, for example
+  `[{"path":"build/fs/term/search-text/a.txt","line":1,"text":"one apple"}]`.
+  The line starts at 1. The text has no `\n`.
+- diskUsage: `inr` of `{"total","free","available"}` in bytes.
+- A number (a search line or a diskUsage value) is `jnum (inl n)` with an
+  Int64 when it is at most INT64_MAX, else `jnum (inr t)` with the
+  decimal text (Q9).
+- A failure is `inl` of an error Text. OS errors use `OP: PATH: TEXT`,
+  with the operation name, the failing path (which can be a descendant
+  of a walk root) and `strerror` for the error, for example
+  `listDir: build/fs/pr/read/none: No such file or directory`.
+- Input validation has its own detail text: a NUL byte in a path gives
+  `OP: the path holds a NUL byte`, without the path; a NUL byte in a
+  find glob gives `find: ROOT: the glob holds a NUL byte`; an empty
+  search text gives `search: ROOT: the search text is empty`.

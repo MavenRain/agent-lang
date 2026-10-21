@@ -284,6 +284,24 @@ Each failure is a value: `Sum Text R` gives `inl` with an error text.
 The request has no file write, no delete, no process spawn and no network
 other than Ollama. A `Log` goes out only through `write` (O11).
 
+S6a note (the S6 rulings Q1 to Q16 (a)): the operations 2, 4, 6, 8 and
+10 are in. Each has one `IOF` constructor (`listDirOp`, `findOp`,
+`readFileOp`, `searchOp`, `diskUsageOp`) and one domain def, with the
+types of the table. The driver gives the keys of an object in this
+order: `name`, `kind` (listDir); `path`, `line`, `text` (search);
+`total`, `free`, `available` (diskUsage). A failure is `inl` of an error
+text. OS errors use `OP: PATH: TEXT`, with the operation name, the failing
+path and `strerror` for the error. A failed walk can name a descendant
+of the root. Input validation uses its own detail text: a NUL byte in
+the path gives `OP: the path holds a NUL byte`; a NUL byte in the glob
+or an empty search text gives `OP: PATH: TEXT` (`formers/tcc-json.md`,
+`## S6 shapes`). A walk does not follow a symbolic link (Q11).
+`examples/fs.lang` has closed functions over sample responses (4 evals).
+The terminal rows list-dir, find-glob, read-file, search-text and
+disk-usage each run a console program on its own tree under
+`build/fs/term/`. The JSON shapes are in `formers/tcc-json.md`,
+`## S6 shapes`.
+
 ## 7. The console program
 
 `langc build PROG -o OUT` checks `PROG`, finds `main : IO Unit` and writes
@@ -325,7 +343,7 @@ document of the instances; it becomes `langc json` and stays as a test aid
 | S3 | The base span: remove the kit sample types that the request does not give, add `Text`, `Int64`, `Nat` (no bound), `Json` and `Log` with the section 5 operations. DONE 2026-10-20: rulings Q1 to Q9 = (a); `docs/STATUS.md`, section S3. |
 | S4 | Coinductive families: guarded `unfold`, lazy `out` (O4). DONE 2026-10-20: rulings Q1 to Q10 = (a); `docs/STATUS.md`, section S4. |
 | S5 | `IO`, the operation signature, `langc build` with libtcc, and the terminal operations 11 to 13. DONE 2026-10-20: rulings Q1 to Q12 = (a), Q-C1 = (a); gate examples 32, evals 163, json 32, path regressions 206, terminal 12; 13 of 13 mutants killed; `docs/STATUS.md`, section S5. |
-| S6a | The filesystem read operations 2, 4, 6, 8 and 10 (`listDir`, `find`, `readFile`, `search`, `diskUsage`), tested in `build/fs/`.  Chunk A: the layer and the check refusals.  Chunk B: the driver and the path regressions.  Chunk C: the examples, the terminal rows, the mutants and the docs. |
+| S6a | The filesystem read operations 2, 4, 6, 8 and 10 (`listDir`, `find`, `readFile`, `search`, `diskUsage`), tested in `build/fs/`.  Chunk A: the layer and the check refusals.  Chunk B: the driver and the path regressions.  Chunk C: the examples, the terminal rows, the mutants and the docs.  DONE 2026-10-21: rulings Q1 to Q16 = (a);  gate examples 33, evals 172, json 33, path regressions 239, terminal 17;  7 of 7 mutants killed (M1 to M7);  `docs/STATUS.md`, section S6a. |
 | S6b | The filesystem write operations 3, 5, 7 and 9 (`makeDir`, `move`, `copy`, `trash`), tested in `build/fs/`, with the chunks A, B and C of S6a. |
 | S7 | `ollama`, tested against a mock server in C that TinyCC builds, and a live probe when a local Ollama runs. |
 | S8 | Examples (a chat loop that keeps a `Log` transcript, a file organizer), mutants, docs. |
