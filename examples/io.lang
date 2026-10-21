@@ -13,10 +13,11 @@ def twoWrites : IO Unit := bind (write "a") (fun (u : Unit) => write "b")
 -- trace A n ins m reads at most n layers of m and gives the JSON text of
 -- a list of the layers: "ret", "tau", "read", "args", the text of a write,
 -- the name and the Text fields of a filesystem operation (S6a and S6b),
--- and "..." when n layers are read. readLine gets the next line of ins
--- (none at the end of ins). args gets an empty array. A filesystem
--- operation gets a fixed inr response: [] ({} for diskUsage, "text" for
--- readFile, unit for makeDir, move, copy and trash).
+-- "ollama", the path and the JSON text of the body (S7), and "..." when n
+-- layers are read. readLine gets the next line of ins (none at the end of
+-- ins). args gets an empty array. A filesystem operation and ollama get a
+-- fixed inr response: [] ({} for diskUsage, "text" for readFile, unit for
+-- makeDir, move, copy and trash).
 -- result A n ins m gives the value at ret, or none when n layers are read.
 def noText : List Text := nil
 def headText : List Text -> Option Text := fun (xs : List Text) => fold (fun (x : Text) (r : Option Text) => some x) none xs
@@ -32,7 +33,8 @@ def layers : (A : Type 0) -> Nat -> List Text -> IO A -> JsonList :=
     (fun (p : Text) (k : Sum Text Unit -> IO A) => jlCons (jstr "makeDir") (jlCons (jstr p) (rest ins (k (inr unit)))))
     (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => jlCons (jstr "move") (jlCons (jstr p) (jlCons (jstr q) (rest ins (k (inr unit))))))
     (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => jlCons (jstr "copy") (jlCons (jstr p) (jlCons (jstr q) (rest ins (k (inr unit))))))
-    (fun (p : Text) (k : Sum Text Unit -> IO A) => jlCons (jstr "trash") (jlCons (jstr p) (rest ins (k (inr unit))))) (out m)) (fun (ins : List Text) (m : IO A) => jlCons (jstr "...") jlNil) n
+    (fun (p : Text) (k : Sum Text Unit -> IO A) => jlCons (jstr "trash") (jlCons (jstr p) (rest ins (k (inr unit)))))
+    (fun (p : Text) (j : Json) (k : Sum Text Json -> IO A) => jlCons (jstr "ollama") (jlCons (jstr p) (jlCons (jstr (jsonRender j)) (rest ins (k (inr (jarr jlNil))))))) (out m)) (fun (ins : List Text) (m : IO A) => jlCons (jstr "...") jlNil) n
 def trace : (A : Type 0) -> Nat -> List Text -> IO A -> Text :=
   fun (A : Type 0) (n : Nat) (ins : List Text) (m : IO A) => jsonRender (jarr (layers A n ins m))
 def result : (A : Type 0) -> Nat -> List Text -> IO A -> Option A :=
@@ -41,7 +43,8 @@ def result : (A : Type 0) -> Nat -> List Text -> IO A -> Option A :=
     (fun (p : Text) (k : Sum Text Text -> IO A) => rest ins (k (inr "text"))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO A) => rest ins (k (inr (jarr jlNil))))
     (fun (p : Text) (k : Sum Text Json -> IO A) => rest ins (k (inr (jobj jfNil))))
     (fun (p : Text) (k : Sum Text Unit -> IO A) => rest ins (k (inr unit))) (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => rest ins (k (inr unit)))
-    (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => rest ins (k (inr unit))) (fun (p : Text) (k : Sum Text Unit -> IO A) => rest ins (k (inr unit))) (out m)) (fun (ins : List Text) (m : IO A) => none) n
+    (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => rest ins (k (inr unit))) (fun (p : Text) (k : Sum Text Unit -> IO A) => rest ins (k (inr unit)))
+    (fun (p : Text) (j : Json) (k : Sum Text Json -> IO A) => rest ins (k (inr (jarr jlNil)))) (out m)) (fun (ins : List Text) (m : IO A) => none) n
 def lines : List Text := cons "p" (cons "q" nil)
 def readLineTrace : Text := trace (Option Text) 5 lines readLine
 def readLineValue : Option (Option Text) := result (Option Text) 5 lines readLine
@@ -68,3 +71,5 @@ def makeDirTrace : Text := trace Unit 9 noText (bind (makeDir "d/new") (fun (r :
 def moveTrace : Text := trace Unit 9 noText (bind (move "d/a.txt" "d/b.txt") (fun (r : Sum Text Unit) => write (showUnit r)))
 def copyTrace : Text := trace Unit 9 noText (bind (copy "d/a.txt" "d/c.txt") (fun (r : Sum Text Unit) => write (showUnit r)))
 def trashTrace : Text := trace Unit 9 noText (bind (trash "d/a.txt") (fun (r : Sum Text Unit) => write (showUnit r)))
+-- The ollama trace binds the operation into a write of the response.
+def ollamaTrace : Text := trace Unit 9 noText (bind (ollama "/api/generate" (jobj (jfCons "model" (jstr "m") (jfCons "prompt" (jstr "hi") jfNil)))) (fun (r : Sum Text Json) => write (showJson r)))

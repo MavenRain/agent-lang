@@ -1,0 +1,2 @@
+-- ollama takes the path as Text (S7 Q2 (a)): a Nat path is refused.
+def wrong : IO (Sum Text Json) := ollama 7 (jobj jfNil)

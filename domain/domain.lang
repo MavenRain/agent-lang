@@ -70,20 +70,22 @@ cofamily Mealy (I : Type 0) (O : Type 0) := MealyF I O
 -- with its continuation. S6a adds the read operations listDirOp, findOp,
 -- readFileOp, searchOp and diskUsageOp (S6 Q1 (a)). S6b adds the write
 -- operations makeDirOp, moveOp, copyOp and trashOp after them, thus each
--- S6a fold arm keeps its place. S7 adds a constructor for each other
--- operation.
-family IOF (A : Type 0) (X : Type 0) := ret (retValue : A) | tau (tauNext : X) | readLineOp (readLineNext : Option Text -> X) | writeOp (writeText : Text) (writeNext : X) | argsOp (argsNext : Json -> X) | listDirOp (listDirPath : Text) (listDirNext : Sum Text Json -> X) | findOp (findRoot : Text) (findGlob : Text) (findNext : Sum Text Json -> X) | readFileOp (readFilePath : Text) (readFileNext : Sum Text Text -> X) | searchOp (searchRoot : Text) (searchText : Text) (searchNext : Sum Text Json -> X) | diskUsageOp (diskUsagePath : Text) (diskUsageNext : Sum Text Json -> X) | makeDirOp (makeDirPath : Text) (makeDirNext : Sum Text Unit -> X) | moveOp (moveFrom : Text) (moveTo : Text) (moveNext : Sum Text Unit -> X) | copyOp (copyFrom : Text) (copyTo : Text) (copyNext : Sum Text Unit -> X) | trashOp (trashPath : Text) (trashNext : Sum Text Unit -> X)
+-- S6a fold arm keeps its place. S7 adds the model operation ollamaOp
+-- after trashOp (S7 Q1 (a)), thus each S6 fold arm keeps its place.
+family IOF (A : Type 0) (X : Type 0) := ret (retValue : A) | tau (tauNext : X) | readLineOp (readLineNext : Option Text -> X) | writeOp (writeText : Text) (writeNext : X) | argsOp (argsNext : Json -> X) | listDirOp (listDirPath : Text) (listDirNext : Sum Text Json -> X) | findOp (findRoot : Text) (findGlob : Text) (findNext : Sum Text Json -> X) | readFileOp (readFilePath : Text) (readFileNext : Sum Text Text -> X) | searchOp (searchRoot : Text) (searchText : Text) (searchNext : Sum Text Json -> X) | diskUsageOp (diskUsagePath : Text) (diskUsageNext : Sum Text Json -> X) | makeDirOp (makeDirPath : Text) (makeDirNext : Sum Text Unit -> X) | moveOp (moveFrom : Text) (moveTo : Text) (moveNext : Sum Text Unit -> X) | copyOp (copyFrom : Text) (copyTo : Text) (copyNext : Sum Text Unit -> X) | trashOp (trashPath : Text) (trashNext : Sum Text Unit -> X) | ollamaOp (ollamaPath : Text) (ollamaBody : Json) (ollamaNext : Sum Text Json -> X)
 cofamily IO (A : Type 0) := IOF A
 -- The IO monad (Q4 and Q5 (a)), by guarded unfolds. ioPure gives ret at
 -- once. readLine, write, args, listDir, find, readFile, search,
--- diskUsage, makeDir, move, copy and trash give one operation layer, then
--- ret with the response; the state none is the step before the
--- operation. A filesystem response is inl with the error text or inr
--- with the value (S6 Q2 (a)); a write operation gives inr unit. ioBind
--- runs m, then f at the value of m: the state inl m copies each layer of
--- m, ret a gives tau at the switch to f a, and the state inr n copies each
--- layer of n. ioMap is ioBind and ioPure. ioLoop runs body at the state s:
--- ret (inr s) gives tau at the next round, ret (inl r) ends the loop.
+-- diskUsage, makeDir, move, copy, trash and ollama give one operation
+-- layer, then ret with the response; the state none is the step before
+-- the operation. A filesystem response is inl with the error text or inr
+-- with the value (S6 Q2 (a)); a write operation gives inr unit. An ollama
+-- response is inl with the error text or inr with the array of the
+-- response objects (S7 Q3 (a)). ioBind runs m, then f at the value of m:
+-- the state inl m copies each layer of m, ret a gives tau at the switch
+-- to f a, and the state inr n copies each layer of n. ioMap is ioBind and
+-- ioPure. ioLoop runs body at the state s: ret (inr s) gives tau at the
+-- next round, ret (inl r) ends the loop.
 def ioPure : (A : Type 0) -> A -> IO A :=
   fun (A : Type 0) (a : A) => unfold (fun (u : Unit) => ret A Unit a) unit
 def readLine : IO (Option Text) :=
@@ -110,6 +112,8 @@ def copy : Text -> Text -> IO (Sum Text Unit) :=
   fun (f : Text) (t : Text) => unfold (fun (s : Option (Sum Text Unit)) => option (copyOp (Sum Text Unit) (Option (Sum Text Unit)) f t (fun (v : Sum Text Unit) => some v)) (fun (v : Sum Text Unit) => ret (Sum Text Unit) (Option (Sum Text Unit)) v) s) none
 def trash : Text -> IO (Sum Text Unit) :=
   fun (p : Text) => unfold (fun (s : Option (Sum Text Unit)) => option (trashOp (Sum Text Unit) (Option (Sum Text Unit)) p (fun (r : Sum Text Unit) => some r)) (fun (r : Sum Text Unit) => ret (Sum Text Unit) (Option (Sum Text Unit)) r) s) none
+def ollama : Text -> Json -> IO (Sum Text Json) :=
+  fun (p : Text) (b : Json) => unfold (fun (s : Option (Sum Text Json)) => option (ollamaOp (Sum Text Json) (Option (Sum Text Json)) p b (fun (v : Sum Text Json) => some v)) (fun (v : Sum Text Json) => ret (Sum Text Json) (Option (Sum Text Json)) v) s) none
 def ioBind : (A : Type 0) -> (B : Type 0) -> IO A -> (A -> IO B) -> IO B :=
   fun (A : Type 0) (B : Type 0) (m : IO A) (f : A -> IO B) => unfold (fun (s : Sum (IO A) (IO B)) => either
     (fun (x : IO A) => fold (fun (a : A) => tau B (Sum (IO A) (IO B)) (inr (f a))) (fun (t : IO A) => tau B (Sum (IO A) (IO B)) (inl t)) (fun (k : Option Text -> IO A) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inl (k r))) (fun (w : Text) (n : IO A) => writeOp B (Sum (IO A) (IO B)) w (inl n)) (fun (k : Json -> IO A) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inl (k j)))
@@ -117,13 +121,13 @@ def ioBind : (A : Type 0) -> (B : Type 0) -> IO A -> (A -> IO B) -> IO B :=
       (fun (p : Text) (k : Sum Text Text -> IO A) => readFileOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Text) => inl (k r))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO A) => searchOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Json) => inl (k r)))
       (fun (p : Text) (k : Sum Text Json -> IO A) => diskUsageOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Json) => inl (k r)))
       (fun (p : Text) (k : Sum Text Unit -> IO A) => makeDirOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Unit) => inl (k r))) (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => moveOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Unit) => inl (k r)))
-      (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => copyOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Unit) => inl (k r))) (fun (p : Text) (k : Sum Text Unit -> IO A) => trashOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Unit) => inl (k r))) (out x))
+      (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO A) => copyOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Unit) => inl (k r))) (fun (p : Text) (k : Sum Text Unit -> IO A) => trashOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Unit) => inl (k r))) (fun (p : Text) (j : Json) (k : Sum Text Json -> IO A) => ollamaOp B (Sum (IO A) (IO B)) p j (fun (r : Sum Text Json) => inl (k r))) (out x))
     (fun (y : IO B) => fold (fun (b : B) => ret B (Sum (IO A) (IO B)) b) (fun (t : IO B) => tau B (Sum (IO A) (IO B)) (inr t)) (fun (k : Option Text -> IO B) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inr (k r))) (fun (w : Text) (n : IO B) => writeOp B (Sum (IO A) (IO B)) w (inr n)) (fun (k : Json -> IO B) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inr (k j)))
       (fun (p : Text) (k : Sum Text Json -> IO B) => listDirOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Json) => inr (k r))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO B) => findOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Json) => inr (k r)))
       (fun (p : Text) (k : Sum Text Text -> IO B) => readFileOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Text) => inr (k r))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO B) => searchOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Json) => inr (k r)))
       (fun (p : Text) (k : Sum Text Json -> IO B) => diskUsageOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Json) => inr (k r)))
       (fun (p : Text) (k : Sum Text Unit -> IO B) => makeDirOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Unit) => inr (k r))) (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO B) => moveOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Unit) => inr (k r)))
-      (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO B) => copyOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Unit) => inr (k r))) (fun (p : Text) (k : Sum Text Unit -> IO B) => trashOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Unit) => inr (k r))) (out y)) s) (inl m)
+      (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO B) => copyOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Unit) => inr (k r))) (fun (p : Text) (k : Sum Text Unit -> IO B) => trashOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Unit) => inr (k r))) (fun (p : Text) (j : Json) (k : Sum Text Json -> IO B) => ollamaOp B (Sum (IO A) (IO B)) p j (fun (r : Sum Text Json) => inr (k r))) (out y)) s) (inl m)
 def ioMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> IO A -> IO B :=
   fun (A : Type 0) (B : Type 0) (f : A -> B) (m : IO A) => ioBind A B m (fun (a : A) => ioPure B (f a))
 def ioLoop : (S : Type 0) -> (R : Type 0) -> (S -> IO (Sum R S)) -> S -> IO R :=
@@ -134,7 +138,7 @@ def ioLoop : (S : Type 0) -> (R : Type 0) -> (S -> IO (Sum R S)) -> S -> IO R :=
     (fun (p : Text) (k : Sum Text Text -> IO (Sum R S)) => readFileOp R (IO (Sum R S)) p k) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO (Sum R S)) => searchOp R (IO (Sum R S)) p q k)
     (fun (p : Text) (k : Sum Text Json -> IO (Sum R S)) => diskUsageOp R (IO (Sum R S)) p k)
     (fun (p : Text) (k : Sum Text Unit -> IO (Sum R S)) => makeDirOp R (IO (Sum R S)) p k) (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO (Sum R S)) => moveOp R (IO (Sum R S)) p q k)
-    (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO (Sum R S)) => copyOp R (IO (Sum R S)) p q k) (fun (p : Text) (k : Sum Text Unit -> IO (Sum R S)) => trashOp R (IO (Sum R S)) p k) (out m)) (body s0)
+    (fun (p : Text) (q : Text) (k : Sum Text Unit -> IO (Sum R S)) => copyOp R (IO (Sum R S)) p q k) (fun (p : Text) (k : Sum Text Unit -> IO (Sum R S)) => trashOp R (IO (Sum R S)) p k) (fun (p : Text) (j : Json) (k : Sum Text Json -> IO (Sum R S)) => ollamaOp R (IO (Sum R S)) p j k) (out m)) (body s0)
 
 -- Kan library (S2a, R6 (a)): transport, subst, J and the J rule as a path
 -- (JRefl, O11), all by transp.

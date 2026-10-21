@@ -84,3 +84,5 @@ io-find-arity.lang TYPE_MISMATCH
 io-readfile-bind.lang TYPE_MISMATCH
 io-move-nat.lang TYPE_MISMATCH
 io-makedir-bind.lang TYPE_MISMATCH
+io-ollama-nat-path.lang TYPE_MISMATCH
+io-ollama-bind.lang TYPE_MISMATCH

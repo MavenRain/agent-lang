@@ -177,3 +177,4 @@ fs usageTotal => some (inl 494384795648)
 fs madeFault => ""
 fs refusedFault => "move: d/b.txt: File exists"
 fs stepFaults => cons "trash: d/none: No such file or directory" nil
+io ollamaTrace => "[\"ollama\",\"/api/generate\",\"{\\\"model\\\":\\\"m\\\",\\\"prompt\\\":\\\"hi\\\"}\",\"tau\",\"[]\",\"ret\"]"

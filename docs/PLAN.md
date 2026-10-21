@@ -153,6 +153,24 @@ Q11: no link is followed in a walk.  Q12: `NAME: PATH: strerror`.
 Q13: build/fs/pr/ and build/fs/term/.  Q14: one arena.  Q15: S6a, then
 S6b.  Q16: the kinds file, dir, link, other; paths under the root.
 
+### USER ruling (S7)
+
+Ruled 2026-10-21 (S7 kickoff, agent-lang-work/S7-kickoff.md, outside the
+repo).  The USER gave the letter (a) to each Q.
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a Q10=a Q11=a Q12=a Q13=a Q14=a Q15=a Q16=a Q17=a Q18=a
+
+Q1: one IOF constructor ollamaOp (path, body, next).  Q2: O12 (a), a
+path from `/` with no control byte.  Q3: Sum Text Json, always an array.
+Q4: OLLAMA_HOST forms, default 127.0.0.1:11434.  Q5: POST, 4 headers,
+Connection: close.  Q6: read to the close; chunked, Content-Length or
+close; CRLF CRLF.  Q7: non-2xx is inl with the error text.  Q8: a bad
+or cut line is inl.  Q9: no timeout in the console program; an IoEnv
+field.  Q10: 64 MiB.  Q11: O10 (a), the jsonParse rule.  Q12: one mock
+source, a forked child, port 0.  Q13: U1 allowLocalBinding.  Q14: the
+USER live probe.  Q15: IoEnv ollama_host and ollama_timeout_ms.  Q16:
+one slice S7.  Q17: ignore SIGPIPE.  Q18: `ollama: URL: TEXT`.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |

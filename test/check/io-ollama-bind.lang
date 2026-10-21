@@ -1,0 +1,3 @@
+-- ollama gives Sum Text Json (S7 Q3 (a)): bind of ollama into a function
+-- at Sum Text Text is refused.
+def wrong : IO Unit := bind (ollama "/api/generate" (jobj jfNil)) (fun (r : Sum Text Text) => write (either (fun (e : Text) => e) (fun (t : Text) => t) r))

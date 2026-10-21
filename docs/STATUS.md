@@ -1698,3 +1698,90 @@ Open items:
 | D1 | HEAD is 8534b3b, the USER commit of S6b chunk C with a review fix (tree 394220c4, not the staged tree 54cb58b7). Makefile:  the target build/terminal-env, which `make check` runs before build/terminal, and test/terminal-env.c in check-clang. test/terminal.c:  `fixture_env` removes XDG_DATA_HOME and refuses an overlong HOME (S6b chunk C, `#### Chunk C staged review`). test/terminal-env.c:  4 checks, the new suite `terminal environment`. The USER ruled (2026-10-21) to use HEAD as the base. |
 | D2 | The prompt puts M1 to M7 in S6a chunk C. M1 and M2 ran in S6a chunk A (gate.sh killers at the trace defs). M3 to M7 ran in S6a chunk C. |
 | D3 | docs/PLAN.md has no S6 milestone line. The rows S6a and S6b give the S6 status. The row S6b now records the trash probe, the suite `terminal environment` and the S6 close. |
+
+## S7:  the ollama operation (2026-10-21)
+
+### Chunk A:  layer and check
+
+Chunk A adds the layer of the operation 1 `ollama` (S7 Q1, Q2 and Q3
+(a)). domain/domain.lang adds the constructor 15 `ollamaOp` to IOF after
+`trashOp` (3 fields:  `ollamaPath : Text`, `ollamaBody : Json` and
+`ollamaNext : Sum Text Json -> X`). Thus each S6 fold arm keeps its
+place. It adds the def `ollama : Text -> Json -> IO (Sum Text Json)` in
+the form of `trash` after `trash`, and the arm in each leg of `ioBind`
+and in `ioLoop`. Each fold over IOF now takes 15 functions, then the
+target. examples/io.lang adds the arm in `layers` and `result`. The
+`layers` arm gives `ollama`, the path and the `jsonRender` text of the
+body. Each arm gives the fixed response `inr []`. The trace def
+`ollamaTrace` binds `ollama "/api/generate"` of a body with 2 fields
+into a `write` of `showJson` of the response. driver.c does not change
+(chunk B):  `io_names` gets each constructor by its name, and an ollama
+layer gives LAYER_OTHER until chunk B.
+
+Precondition:  HEAD ba407a4 (the USER S6 close commit), tree ea4bdb43,
+`git status --short` empty. `make -B check` GREEN at the S6 close
+counts, `make -B check-clang` rc 0. The USER ruling:  Q1 to Q18 (a).
+
+| Suite | Count |
+|---|---|
+| examples | 33 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 88 |
+| evals | 180 |
+| json | 33 |
+| json refusals | 4 |
+| gate | 0 failures |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 262 checked, 0 failed |
+| terminal environment | 4 checked, 0 failed |
+| terminal | 21 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. The dash sweep is empty.
+`git diff --check` is clean.
+
+The name probe tested the 6 names (`ollama`, `ollamaOp`, `ollamaPath`,
+`ollamaBody`, `ollamaNext`, `ollamaTrace`) against src/,
+test/regressions.js, test/terminal.c and the other examples:  no hit.
+
+Edit sites:
+
+- domain/domain.lang:  the IOF line, its comment, the IO monad comment,
+  `def ollama` after `trash`, `ioBind` (2 legs) and `ioLoop`.
+- examples/io.lang:  the comment, `layers`, `result` and `ollamaTrace`
+  (with its comment). test/eval/expect.txt:  1 row. test/json/io.json:
+  the trace text (the 23 instances of the S6 text do not change;  the
+  24th is `ollamaTrace`).
+- test/check:  io-ollama-nat-path.lang (`expected a term of type Text,
+  found a term of type Nat`) and io-ollama-bind.lang (`the binder type
+  Sum Text Text differs from the expected type Sum Text Json`), each
+  TYPE_MISMATCH.
+- test/path-regressions.c:  the arm `(fun p j k => 0)` in each of the 6
+  guest folds over `out`, the budget of `ioLoop of 1000 rounds` and its
+  2 comments (`370 at S7`).
+- docs/PLAN.md:  the `### USER ruling (S7)` block after the S6 block
+  (Q16 (a):  section 8 does not change).
+
+Budget (one runner script under $TMPDIR;  the copy of the repo reads
+the budget from PR_LOOP_BUDGET):
+
+| Row | S6b minimum | S7 A minimum | Budget |
+|---|---|---|---|
+| `ioLoop of 1000 rounds` | 362 | 370 (369 gives status 1) | 380 |
+
+| Id | Deviation |
+|---|---|
+| D1 | U1 is not set. The USER message gives U1 as the form `<set / not set>`. The sandbox `bind` of 127.0.0.1 at port 0 gives EPERM again (the kickoff probe binary, 2026-10-21). Chunk A does not need U1. Chunk B needs it. |
+| D2 | The kickoff names no path and no body for the trace. `ollamaTrace` uses `/api/generate` and `{"model":"m","prompt":"hi"}`. The trace text holds the body as a JSON text in a JSON string. |
+| D3 | The kickoff M2 names the refusal `ollama-nat-path`. The files are io-ollama-nat-path.lang and io-ollama-bind.lang (the S6 `io-` prefix). |
+| D4 | `layer 3 operations at one segment` (`FS_SEGMENT_BUDGET` 305) passes with the new arm. This chunk did not probe its new minimum. |
+
+| Id | Mutant | Killer |
+|---|---|---|
+| M1 | `ioBind` leg `inl`:  the ollamaOp arm gives `k (inl "")` in place of `k r` | gate.sh `FAIL eval io ollamaTrace` (KILLED;  then `FAIL json examples/io.lang`) |
+| M2 | `ollamaPath : Nat` and `def ollama : Nat -> ...` (the binders follow, thus the domain loads) | gate.sh `FAIL examples/io.lang: langc: TYPE_MISMATCH: layers: the binder type Text differs from the expected type Nat` (KILLED;  then `FAIL io-ollama-nat-path.lang: want exit 1 and TYPE_MISMATCH, got exit 0` and the io evals) |
+
+M1 and M2 ran after `git add`, each with `make -B check`, and were
+restored with `git checkout -- domain/domain.lang` (`git diff --quiet`
+gives 0). `make -B check` after the restore is GREEN. M3 to M10 run in
+S7 chunk C (driver mutants).
