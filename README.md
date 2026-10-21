@@ -53,6 +53,16 @@ A failure is a value: `inl` of an error text. OS errors use
 `examples/fs.lang` reads sample responses. `formers/tcc-json.md`,
 section `## S6 shapes`, gives the JSON forms.
 
+Filesystem writes (S6b, `docs/STATUS.md`, section S6b): a console
+program can use `makeDir : Text -> IO (Sum Text Unit)` (a directory and
+its parents), `move : Text -> Text -> IO (Sum Text Unit)`,
+`copy : Text -> Text -> IO (Sum Text Unit)` (a file, a link as a link,
+or a directory tree with the mode bits) and
+`trash : Text -> IO (Sum Text Unit)` (macOS `HOME/.Trash`, Linux the
+XDG trash). Each gives `inr unit`, or `inl` of `OP: PATH: TEXT`. `move`
+and `copy` refuse a destination that is there. No operation deletes a
+path:  `trash` moves it.
+
 - `SPEC.md`: the specification. Fill each section.
 - `design/DESIGN.md`: the domain design. It is the only source of the core
   types and the core operations.

@@ -1531,3 +1531,100 @@ usable before copying children, then restores the source mode. On macOS
 it also preserves symlink modes without following the links: umask can
 otherwise make a copied link unreadable. The copy row checks a file,
 directory and symlink under that mask. All four rows pass after the fixes.
+
+### Chunk C:  examples, terminal rows, mutants and docs
+
+Chunk C adds 3 evals to examples/fs.lang, 4 fs terminal rows and the
+mutants M9 to M13. driver.c does not change. examples/fs.lang adds
+`faultOf` (the text of an `inl` response, `""` at `inr unit`) and
+`faults` (the texts of the `inl` responses of a list, in the list order)
+at the sample responses `made`, `refused` and `steps`. test/terminal.c
+adds the rows make-dir, move-refuse, copy-tree and trash-home. Each
+guest program writes the response, then the listDir response that shows
+the tree after the operation (move-refuse also writes the bytes of
+b.txt). trash-home runs with a copy of the environment that has
+HOME=CWD/build/fs/term/trash-home/home (`fixture_env`):  the trash goes
+into that HOME/.Trash, never the real HOME. terminal.c does not call
+`setenv`.
+
+| Suite | Count |
+|---|---|
+| examples | 33 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 86 |
+| evals | 179 |
+| json | 33 |
+| json refusals | 4 |
+| gate | 0 failures |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 262 checked, 0 failed (D1) |
+| terminal | 21 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. `git diff --check` and the dash
+sweep are empty.
+
+Edit sites:
+
+- examples/fs.lang:  the S6b comment, `noStep`, `faultOf`, `faults`,
+  `made`, `refused`, `steps`, `madeFault`, `refusedFault` and
+  `stepFaults`. test/eval/expect.txt:  3 rows. test/json/fs.json:  7 new
+  instances after the 11 instances of S6a, which do not change.
+- test/terminal.c:  the header comment, `MAX_ENV`, `run` (the parameter
+  ENVP;  the other callers give `environ`), `fs_rows` (9 rows), 8
+  `fs_items` lines, `fixture_env`, and in `run_fixture` the environment
+  of the run.
+- test/term:  make-dir, move-refuse, copy-tree and trash-home (each
+  `.lang`, `.code` and `.out`).
+- Docs:  docs/PLAN.md (the row S6b, the S6b note after O16) and
+  README.md (the S6b paragraph).
+
+| Eval | Value |
+|---|---|
+| `madeFault` (`faultOf` at `inr unit`) | `""` |
+| `refusedFault` | `"move: d/b.txt: File exists"` |
+| `stepFaults` (3 responses, one `inl`) | `cons "trash: d/none: No such file or directory" nil` |
+
+| Row | Tree | Output |
+|---|---|---|
+| make-dir | empty | `unit`, then `[{"name":"b","kind":"dir"}]` (makeDir of a/b made a) |
+| move-refuse | a.txt, b.txt | `move: build/fs/term/move-refuse/b.txt: File exists`, the bytes `b` of b.txt, then a.txt and b.txt |
+| copy-tree | d, d/f.txt, d/sub, d/l to f.txt | `unit`, e holds f.txt (file), l (link) and sub (dir), then the tree holds d and e |
+| trash-home | a.txt, home | `unit`, the tree holds home only, then HOME/.Trash holds a.txt |
+
+| Id | Mutant (driver.c) | First killer | Result |
+|---|---|---|---|
+| M9 | `move_path`:  `0 &&` before the `fs_there (TO)` test (line 902;  no lstat, the rename replaces TO) | path regression `move destination there` (1 row fails) | KILLED |
+| M10 | `fs_copy_file`:  `((void)mode, 1)` in place of the `fchmod` (line 766;  D2) | path regression `move EXDEV` (D2;  3 rows fail, `copy mode` among them) | KILLED |
+| M11 | `trash_macos`:  `unlink (path)` in place of `rename (path, dest)` (line 1003) | path regression `trash macOS form` (3 rows fail) | KILLED |
+| M12 | `make_dir`:  `if (i < len) continue;` (one `mkdir` of the full path, line 738;  D3) | path regression `makeDir parents` (2 rows fail) | KILLED |
+| M13 | `layer_of`:  moveOp gives `LAYER_COPY` (line 155) | path regression `move file`:  a.txt stays (5 rows fail) | KILLED |
+
+Each mutant ran after `git add`, with `make -B check`, and was restored
+with `git checkout -- src/runtime/driver.c`. `git diff --quiet` passed
+after each restore. 5 of 5 S6b driver mutants KILLED (M8 is KILLED in S6b chunk A).
+
+The USER live trash probe (agent-lang-work/S6b-trash-probe.sh, outside
+the sandbox, at the real HOME):  OPEN (the USER did not run it in this session).
+
+| Id | Deviation |
+|---|---|
+| D1 | HEAD is 23aadaa, the USER commit of chunk B with review fixes (tree ccd269b2, not the staged tree 43e5172b). driver.c:  `trash_dir` makes the missing parents with mode 0700, `fs_copy_dir` and `fs_copy_link` keep usable modes under umask 0777, and the XDG info file gets mode 0600. path-regressions.c:  4 rows. The path regressions are 262, not 258. The USER ruled (2026-10-21) to use HEAD as the base. The mutant lines are on HEAD. |
+| D2 | M10 as `1` in place of the `fchmod` failed at check-clang (`-Wunused-parameter`:  `mode` unused) before a test ran. M10 uses `((void)mode, 1)`:  `mode` stays used, and the copy keeps the mode of the `open` (0600). The first killer is `move EXDEV` (its EXDEV leg runs `fs_copy_file`;  e/f.txt has the mode 0600, not 0640), not `copy mode`:  make reaches the row `move EXDEV` first. `copy mode` also fails (3 rows fail). |
+| D3 | The text of the M12 site occurs 2 times (`make_dir` line 738 and `trash_dir`). M12 edits the first only. |
+| D4 | The terminal goldens hold the macOS form:  on Linux, trash-home uses the XDG trash under HOME/.local/share and its listDir of HOME/.Trash differs (kickoff section 5:  the goldens hold the macOS texts). The review fix removes the inherited XDG_DATA_HOME from the guest environment so that this trash also stays under the fixture HOME. |
+| D5 | The chunk B D-rows D1, D3, D4 and D5 still have no row (the path regression count stays). The PLAN S6b note names them as not tested. |
+
+#### Chunk C staged review (2026-10-21)
+
+`fixture_env` now removes the inherited XDG_DATA_HOME: on Linux that
+variable takes precedence over HOME and could send a fixture file to the
+parent's trash directory. It also checks the length returned by
+`snprintf`. A working directory that fits the 512-byte cwd buffer can
+still leave too little room for the HOME suffix; the guest must not run
+with that truncated path.
+
+test/terminal-env.c checks the copied environment, preservation of the
+parent environment, other fixtures and an overlong HOME. Before the
+fix, the external-root and long-path checks fail. Makefile runs these
+four checks as part of `make check` and includes the source in check-clang.

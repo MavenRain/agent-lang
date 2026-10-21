@@ -1,0 +1,6 @@
+-- Writes the move response of a.txt to b.txt (S6b), the bytes of b.txt
+-- and the listDir response of the tree:  b.txt is there, thus move refuses
+-- and both files stay as they were.
+def show : Sum Text Unit -> Text := fun (r : Sum Text Unit) => either (fun (e : Text) => e) (fun (u : Unit) => "unit") r
+def shown : Sum Text Json -> Text := fun (r : Sum Text Json) => either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r
+def main : IO Unit := bind (move "build/fs/term/move-refuse/a.txt" "build/fs/term/move-refuse/b.txt") (fun (r : Sum Text Unit) => bind (readFile "build/fs/term/move-refuse/b.txt") (fun (b : Sum Text Text) => bind (listDir "build/fs/term/move-refuse") (fun (l : Sum Text Json) => write (textAppend (show r) (textAppend "\n" (textAppend (either (fun (e : Text) => e) (fun (t : Text) => t) b) (textAppend (shown l) "\n")))))))

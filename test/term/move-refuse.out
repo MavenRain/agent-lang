@@ -1,0 +1,3 @@
+move: build/fs/term/move-refuse/b.txt: File exists
+b
+[{"name":"a.txt","kind":"file"},{"name":"b.txt","kind":"file"}]

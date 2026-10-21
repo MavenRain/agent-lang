@@ -1,0 +1,5 @@
+-- Writes the makeDir response of a/b (S6b), then the listDir response of
+-- a:  makeDir makes the parent a, then b.
+def show : Sum Text Unit -> Text := fun (r : Sum Text Unit) => either (fun (e : Text) => e) (fun (u : Unit) => "unit") r
+def shown : Sum Text Json -> Text := fun (r : Sum Text Json) => either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r
+def main : IO Unit := bind (makeDir "build/fs/term/make-dir/a/b") (fun (r : Sum Text Unit) => bind (listDir "build/fs/term/make-dir/a") (fun (l : Sum Text Json) => write (textAppend (show r) (textAppend "\n" (textAppend (shown l) "\n")))))

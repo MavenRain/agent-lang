@@ -1,0 +1,5 @@
+-- Writes the copy response of d to e (S6b), the listDir response of e and
+-- that of the tree:  the link l is copied as a link, and d stays.
+def show : Sum Text Unit -> Text := fun (r : Sum Text Unit) => either (fun (e : Text) => e) (fun (u : Unit) => "unit") r
+def shown : Sum Text Json -> Text := fun (r : Sum Text Json) => either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r
+def main : IO Unit := bind (copy "build/fs/term/copy-tree/d" "build/fs/term/copy-tree/e") (fun (r : Sum Text Unit) => bind (listDir "build/fs/term/copy-tree/e") (fun (l : Sum Text Json) => bind (listDir "build/fs/term/copy-tree") (fun (t : Sum Text Json) => write (textAppend (show r) (textAppend "\n" (textAppend (shown l) (textAppend "\n" (textAppend (shown t) "\n"))))))))

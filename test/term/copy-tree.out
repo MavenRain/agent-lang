@@ -1,0 +1,3 @@
+unit
+[{"name":"f.txt","kind":"file"},{"name":"l","kind":"link"},{"name":"sub","kind":"dir"}]
+[{"name":"d","kind":"dir"},{"name":"e","kind":"dir"}]

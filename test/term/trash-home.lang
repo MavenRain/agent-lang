@@ -1,0 +1,6 @@
+-- Writes the trash response of a.txt (S6b), the listDir response of the
+-- tree and that of HOME/.Trash. The runner gives HOME under
+-- build/fs/term/trash-home (the macOS form), never the real HOME.
+def show : Sum Text Unit -> Text := fun (r : Sum Text Unit) => either (fun (e : Text) => e) (fun (u : Unit) => "unit") r
+def shown : Sum Text Json -> Text := fun (r : Sum Text Json) => either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r
+def main : IO Unit := bind (trash "build/fs/term/trash-home/a.txt") (fun (r : Sum Text Unit) => bind (listDir "build/fs/term/trash-home") (fun (l : Sum Text Json) => bind (listDir "build/fs/term/trash-home/home/.Trash") (fun (t : Sum Text Json) => write (textAppend (show r) (textAppend "\n" (textAppend (shown l) (textAppend "\n" (textAppend (shown t) "\n"))))))))

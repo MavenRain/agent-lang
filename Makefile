@@ -44,14 +44,18 @@ build/path-regressions: test/path-regressions.c $(FRONT) $(TARGET) $(DRIVER) $(H
 build/terminal: test/terminal.c
 	$(TCC) $(CFLAGS) -o $@ test/terminal.c
 
-check-clang: build/domain.c
-	$(CC) $(CLANG_FLAGS) $(TCC_FLAGS) $(SRC) src/runtime/rt_main.c test/path-regressions.c test/terminal.c build/domain.c
+build/terminal-env: test/terminal-env.c test/terminal.c
+	$(TCC) $(CFLAGS) -o $@ test/terminal-env.c
 
-check: build/langc build/path-regressions build/terminal check-clang
+check-clang: build/domain.c
+	$(CC) $(CLANG_FLAGS) $(TCC_FLAGS) $(SRC) src/runtime/rt_main.c test/path-regressions.c test/terminal.c test/terminal-env.c build/domain.c
+
+check: build/langc build/path-regressions build/terminal build/terminal-env check-clang
 	sh test/gate.sh
 	CC="$(CC)" TCC="$(TCC)" TCC_HOME="$(TCC_HOME)" node test/regressions.js
 	node test/printer-regressions.js
 	build/path-regressions
+	build/terminal-env
 	build/terminal
 
 clean:

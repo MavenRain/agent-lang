@@ -174,3 +174,6 @@ fs listNames => cons "a.txt" (cons "sub" nil)
 fs foundPaths => cons "d/a.c" (cons "d/sub/b.c" nil)
 fs hitLines => cons "one apple" (cons "apple pie" nil)
 fs usageTotal => some (inl 494384795648)
+fs madeFault => ""
+fs refusedFault => "move: d/b.txt: File exists"
+fs stepFaults => cons "trash: d/none: No such file or directory" nil

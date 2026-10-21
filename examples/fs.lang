@@ -50,3 +50,18 @@ def listNames : List Text := names listing
 def foundPaths : List Text := paths found
 def hitLines : List Text := hitTexts hits
 def usageTotal : Option (Sum Int64 Text) := total usage
+-- The write responses (S6b). makeDir, move, copy and trash give inr unit,
+-- or inl of the text OP: PATH: TEXT. faultOf gives the text of an inl
+-- response ("" at inr unit). faults gives the texts of the inl responses
+-- of a list, in the list order.
+def noStep : List (Sum Text Unit) := nil
+def faultOf : Sum Text Unit -> Text :=
+  fun (r : Sum Text Unit) => either (fun (e : Text) => e) (fun (u : Unit) => "") r
+def faults : List (Sum Text Unit) -> List Text :=
+  fun (l : List (Sum Text Unit)) => fold (fun (x : Sum Text Unit) (rest : List Text) => either (fun (e : Text) => cons e rest) (fun (u : Unit) => rest) x) noText l
+def made : Sum Text Unit := inr unit
+def refused : Sum Text Unit := inl "move: d/b.txt: File exists"
+def steps : List (Sum Text Unit) := cons (inr unit) (cons (inl "trash: d/none: No such file or directory") (cons (inr unit) noStep))
+def madeFault : Text := faultOf made
+def refusedFault : Text := faultOf refused
+def stepFaults : List Text := faults steps

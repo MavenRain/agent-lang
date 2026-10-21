@@ -7,8 +7,10 @@
    standard error must start with its text. A code gives a refusal
    fixture: langc builds into build/term/none/NAME, a directory that does
    not exist, and must exit 1 with "langc: CODE: " at the start of the
-   standard error. An fs row (S6a) first gets its own tree under
-   build/fs/term/NAME from the table fs_items. The runner writes only under
+   standard error. An fs row (S6a, S6b) first gets its own tree under
+   build/fs/term/NAME from the table fs_items. The row trash-home runs with
+   a copy of the environment that has HOME under build/fs/term/trash-home
+   (fixture_env), never the real HOME. The runner writes only under
    build/term/ and build/fs/term/. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
@@ -26,15 +28,16 @@ extern char **environ;
 
 #define MAX_FIXTURES 64
 #define MAX_ARGS 16
+#define MAX_ENV 512
 #define NAME_BYTES 128
 #define PATH_BYTES 512
 #define TEXT_BYTES 65536
 
 static char names[MAX_FIXTURES][NAME_BYTES];
 
-/* Runs ARGV with the standard streams IN, OUT and ERR. Returns the exit
-   code, or -1. */
-static int run(char *const *argv, const char *in, const char *out, const char *err) {
+/* Runs ARGV with the standard streams IN, OUT and ERR and the environment
+   ENVP. Returns the exit code, or -1. */
+static int run(char *const *argv, const char *in, const char *out, const char *err, char *const *envp) {
   posix_spawn_file_actions_t actions;
   pid_t pid;
   int status = 0;
@@ -43,7 +46,7 @@ static int run(char *const *argv, const char *in, const char *out, const char *e
   posix_spawn_file_actions_addopen(&actions, 0, in, O_RDONLY, 0);
   posix_spawn_file_actions_addopen(&actions, 1, out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   posix_spawn_file_actions_addopen(&actions, 2, err, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  spawned = posix_spawn(&pid, argv[0], &actions, NULL, argv, environ) == 0;
+  spawned = posix_spawn(&pid, argv[0], &actions, NULL, argv, envp) == 0;
   posix_spawn_file_actions_destroy(&actions);
   if (!spawned || waitpid(pid, &status, 0) != pid) return -1;
   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -81,7 +84,8 @@ typedef struct {
   size_t len;
 } FsItem;
 
-static const char *const fs_rows[] = {"disk-usage", "find-glob", "list-dir", "read-file", "search-text"};
+static const char *const fs_rows[] = {"copy-tree", "disk-usage", "find-glob", "list-dir", "make-dir", "move-refuse", "read-file",
+  "search-text", "trash-home"};
 
 static const FsItem fs_items[] = {
   {"list-dir", FS_FILE, "b.txt", "b\n", 2},
@@ -99,6 +103,14 @@ static const FsItem fs_items[] = {
   {"search-text", FS_FILE, "a.txt", "one apple\ntwo\n", 14},
   {"search-text", FS_FILE, "b.txt", "apple pie", 9},
   {"search-text", FS_FILE, "bin.dat", "apple\0x\n", 8},
+  {"move-refuse", FS_FILE, "a.txt", "a\n", 2},
+  {"move-refuse", FS_FILE, "b.txt", "b\n", 2},
+  {"copy-tree", FS_DIR, "d", NULL, 0},
+  {"copy-tree", FS_FILE, "d/f.txt", "f\n", 2},
+  {"copy-tree", FS_DIR, "d/sub", NULL, 0},
+  {"copy-tree", FS_LINK, "d/l", "f.txt", 0},
+  {"trash-home", FS_FILE, "a.txt", "a\n", 2},
+  {"trash-home", FS_DIR, "home", NULL, 0},
 };
 
 /* Makes build/fs/term/NAME and its items when NAME is an fs row. Returns 0
@@ -169,6 +181,31 @@ static int fixtures(void) {
 }
 
 /* A run fixture with the exit code CODE. Returns 1 if it passes. */
+/* The environment of the run fixture NAME:  environ, but trash-home gets a
+   copy without XDG_DATA_HOME, with HOME=CWD/build/fs/term/trash-home/home
+   (kickoff section 5: no test uses the real HOME, and the runner does not
+   call setenv). Returns
+   NULL when the copy cannot be made. */
+static char *const *fixture_env(const char *name) {
+  static char home[PATH_BYTES];
+  static char *env[MAX_ENV + 2];
+  char cwd[PATH_BYTES];
+  size_t n = 0;
+  size_t i;
+  int len;
+  if (strcmp(name, "trash-home") != 0) return environ;
+  if (getcwd(cwd, sizeof cwd) == NULL) return NULL;
+  len = snprintf(home, sizeof home, "HOME=%s/build/fs/term/trash-home/home", cwd);
+  if (len < 0 || (size_t)len >= sizeof home) return NULL;
+  for (i = 0; environ[i] != NULL && n < MAX_ENV; i++)
+    if (strncmp(environ[i], "HOME=", 5) != 0 && strncmp(environ[i], "XDG_DATA_HOME=", 14) != 0)
+      env[n++] = environ[i];
+  if (environ[i] != NULL) return NULL;
+  env[n++] = home;
+  env[n] = NULL;
+  return env;
+}
+
 static int run_fixture(const char *name, int code) {
   static char want[TEXT_BYTES];
   static char got[TEXT_BYTES];
@@ -181,6 +218,7 @@ static int run_fixture(const char *name, int code) {
   int status;
   long want_len;
   long got_len;
+  char *const *env;
   snprintf(source, sizeof source, "test/term/%s.lang", name);
   snprintf(exe, sizeof exe, "build/term/%s", name);
   snprintf(out, sizeof out, "build/term/%s.stdout", name);
@@ -191,7 +229,7 @@ static int run_fixture(const char *name, int code) {
   build[3] = "-o";
   build[4] = exe;
   build[5] = NULL;
-  status = run(build, "/dev/null", out, err);
+  status = run(build, "/dev/null", out, err, environ);
   if (status != 0) {
     printf("FAIL terminal %s: langc build exit %d (%s)\n", name, status, err);
     return 0;
@@ -203,7 +241,12 @@ static int run_fixture(const char *name, int code) {
   argv[argc] = NULL;
   snprintf(in, sizeof in, "test/term/%s.in", name);
   if (!exists(in)) snprintf(in, sizeof in, "/dev/null");
-  status = run(argv, in, out, err);
+  env = fixture_env(name);
+  if (env == NULL) {
+    printf("FAIL terminal %s: cannot make the environment\n", name);
+    return 0;
+  }
+  status = run(argv, in, out, err, env);
   snprintf(path, sizeof path, "test/term/%s.out", name);
   want_len = slurp(path, want, sizeof want);
   got_len = slurp(out, got, sizeof got);
@@ -244,7 +287,7 @@ static int refusal_fixture(const char *name, const char *code) {
   build[3] = "-o";
   build[4] = exe;
   build[5] = NULL;
-  status = run(build, "/dev/null", out, err);
+  status = run(build, "/dev/null", out, err, environ);
   slurp(err, text, sizeof text);
   if (status != 1 || strncmp(text, prefix, strlen(prefix)) != 0) {
     printf("FAIL terminal %s: want exit 1 and %s, got exit %d and %.80s\n", name, code, status, text);
@@ -261,11 +304,11 @@ int main(void) {
   int count;
   int failed = 0;
   int i;
-  if (run(clean, "/dev/null", "/dev/null", "/dev/null") != 0 || mkdir("build/term", 0755) != 0) {
+  if (run(clean, "/dev/null", "/dev/null", "/dev/null", environ) != 0 || mkdir("build/term", 0755) != 0) {
     printf("FAIL terminal: cannot make build/term\n");
     return 1;
   }
-  if (run(clean_fs, "/dev/null", "/dev/null", "/dev/null") != 0 || (mkdir("build/fs", 0755) != 0 && errno != EEXIST)
+  if (run(clean_fs, "/dev/null", "/dev/null", "/dev/null", environ) != 0 || (mkdir("build/fs", 0755) != 0 && errno != EEXIST)
       || mkdir("build/fs/term", 0755) != 0) {
     printf("FAIL terminal: cannot make build/fs/term\n");
     return 1;
