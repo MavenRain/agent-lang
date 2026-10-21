@@ -1,0 +1,3 @@
+-- A tau loop with no operation fills the arena before the budget ends:
+-- OOM, exit 1 (docs/STATUS.md D11, docs/PLAN.md O22).
+def main : IO Unit := unfold (fun (u : Unit) => tau Unit Unit u) unit

@@ -1,0 +1,2 @@
+-- Writes each line of the input (S5 chunk C).
+def main : IO Unit := ioLoop Unit Unit (fun (u : Unit) => bind readLine (fun (r : Option Text) => option (pure (inl unit)) (fun (t : Text) => map (fun (x : Unit) => inr x) (write (textAppend t "\n"))) r)) unit

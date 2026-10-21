@@ -1,0 +1,40 @@
+-- IO programs (S5). echo writes each line of the input to the output with
+-- ioLoop. greet writes the JSON text of the arguments. count counts the
+-- lines of the input with map, then writes the number with bind.
+def echoRound : Unit -> IO (Sum Unit Unit) :=
+  fun (u : Unit) => bind readLine (fun (r : Option Text) => option (pure (inl unit)) (fun (t : Text) => map (fun (x : Unit) => inr x) (write (textAppend t "\n"))) r)
+def echo : IO Unit := ioLoop Unit Unit echoRound unit
+def greet : IO Unit := bind args (fun (j : Json) => write (textAppend "hello " (textAppend (jsonRender j) "\n")))
+def countRound : Nat -> IO (Sum Nat Nat) :=
+  fun (n : Nat) => map (fun (r : Option Text) => option (inl n) (fun (t : Text) => inr (natAdd n 1)) r) readLine
+def countLines : IO Nat := ioLoop Nat Nat countRound 0
+def count : IO Unit := bind countLines (fun (n : Nat) => write (textAppend (natShow n) "\n"))
+def twoWrites : IO Unit := bind (write "a") (fun (u : Unit) => write "b")
+-- trace A n ins m reads at most n layers of m and gives the JSON text of
+-- a list of the layers: "ret", "tau", "read", "args", the text of a write,
+-- and "..." when n layers are read. readLine gets the next line of ins
+-- (none at the end of ins). args gets an empty array. result A n ins m
+-- gives the value at ret, or none when n layers are read.
+def noText : List Text := nil
+def headText : List Text -> Option Text := fun (xs : List Text) => fold (fun (x : Text) (r : Option Text) => some x) none xs
+def tailText : List Text -> List Text :=
+  fun (xs : List Text) => second (fold (fun (x : Text) (acc : Prod (List Text) (List Text)) => pair (cons x (first acc)) (first acc)) (pair noText noText) xs)
+def layers : (A : Type 0) -> Nat -> List Text -> IO A -> JsonList :=
+  fun (A : Type 0) (n : Nat) => fold (fun (rest : List Text -> IO A -> JsonList) (ins : List Text) (m : IO A) => fold (fun (a : A) => jlCons (jstr "ret") jlNil) (fun (t : IO A) => jlCons (jstr "tau") (rest ins t)) (fun (k : Option Text -> IO A) => jlCons (jstr "read") (rest (tailText ins) (k (headText ins)))) (fun (w : Text) (next : IO A) => jlCons (jstr w) (rest ins next)) (fun (k : Json -> IO A) => jlCons (jstr "args") (rest ins (k (jarr jlNil)))) (out m)) (fun (ins : List Text) (m : IO A) => jlCons (jstr "...") jlNil) n
+def trace : (A : Type 0) -> Nat -> List Text -> IO A -> Text :=
+  fun (A : Type 0) (n : Nat) (ins : List Text) (m : IO A) => jsonRender (jarr (layers A n ins m))
+def result : (A : Type 0) -> Nat -> List Text -> IO A -> Option A :=
+  fun (A : Type 0) (n : Nat) => fold (fun (rest : List Text -> IO A -> Option A) (ins : List Text) (m : IO A) => fold (fun (a : A) => some a) (fun (t : IO A) => rest ins t) (fun (k : Option Text -> IO A) => rest (tailText ins) (k (headText ins))) (fun (w : Text) (next : IO A) => rest ins next) (fun (k : Json -> IO A) => rest ins (k (jarr jlNil))) (out m)) (fun (ins : List Text) (m : IO A) => none) n
+def lines : List Text := cons "p" (cons "q" nil)
+def readLineTrace : Text := trace (Option Text) 5 lines readLine
+def readLineValue : Option (Option Text) := result (Option Text) 5 lines readLine
+def endOfInput : Option (Option Text) := result (Option Text) 5 noText readLine
+def writeTrace : Text := trace Unit 5 noText (write "hi")
+def argsTrace : Text := trace Json 5 noText args
+def bindOrder : Text := trace Unit 9 noText twoWrites
+def mapValue : Option Nat := result Nat 5 lines (map (fun (r : Option Text) => option 0 textLength r) readLine)
+def echoTrace : Text := trace Unit 20 lines echo
+def echoCut : Text := trace Unit 3 lines echo
+def countValue : Option Nat := result Nat 40 (cons "a" lines) countLines
+def countTrace : Text := trace Unit 20 lines count
+def greetTrace : Text := trace Unit 9 noText greet

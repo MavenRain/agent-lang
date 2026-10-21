@@ -24,6 +24,22 @@ gives an output and the next machine for each input. Each `out` applies
 `g` one time. There is no path from a bisimulation (Q5): two unfolds are
 equal only when their steps and their seeds are equal.
 
+Console programs (S5, `docs/STATUS.md`, section S5): a program with
+`def main : IO Unit` is a console program. `langc build PROG -o OUT`
+checks `PROG` and writes the executable `OUT` with libtcc
+(`~/.local/lib/libtcc.a`). The terminal operations are
+`readLine : IO (Option Text)` (a line without its newline, or `none` at
+the end of the input), `write : Text -> IO Unit` (the bytes, then a
+flush) and `args : IO Json` (an array of the arguments after the program
+name). `pure`, `map` and `bind` work at `IO`, and `ioLoop` makes a loop.
+`OUT` exits 0 when `main` ends. It exits 1 at a run time refusal (for
+example EVAL_FUEL, OOM or IO_WRITE), with the diagnostic on stderr.
+`langc build` refuses a program with no `main` (BUILD_MAIN) or with a
+`main` that is not `IO Unit` (BUILD_MAIN_TYPE). A libtcc error is
+BUILD_TCC. `langc json PROG [-o OUT]` writes the JSON document of the
+instances. `examples/io.lang` has an echo loop, a greeting from the
+arguments and a line counter.
+
 - `SPEC.md`: the specification. Fill each section.
 - `design/DESIGN.md`: the domain design. It is the only source of the core
   types and the core operations.

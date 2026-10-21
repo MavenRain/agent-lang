@@ -149,3 +149,15 @@ mealy finalCounter => 12
 mealy startAt 6 => 6
 mealy afterOne 5 => 15
 mealy runAgrees => fun _ => 12
+io readLineTrace => "[\"read\",\"ret\"]"
+io readLineValue => some (some "p")
+io endOfInput => some none
+io writeTrace => "[\"hi\",\"ret\"]"
+io argsTrace => "[\"args\",\"ret\"]"
+io bindOrder => "[\"a\",\"tau\",\"b\",\"ret\"]"
+io mapValue => some 1
+io echoTrace => "[\"read\",\"tau\",\"p\\u000a\",\"tau\",\"tau\",\"read\",\"tau\",\"q\\u000a\",\"tau\",\"tau\",\"read\",\"tau\",\"ret\"]"
+io echoCut => "[\"read\",\"tau\",\"p\\u000a\",\"...\"]"
+io countValue => some 3
+io countTrace => "[\"read\",\"tau\",\"tau\",\"read\",\"tau\",\"tau\",\"read\",\"tau\",\"tau\",\"2\\u000a\",\"ret\"]"
+io greetTrace => "[\"args\",\"tau\",\"hello []\\u000a\",\"ret\"]"

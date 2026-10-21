@@ -237,6 +237,15 @@ does not name.
 
 A program has `def main : IO Unit`.
 
+S5 note (Q1 and Q2 (a)): the domain gives `IO A` as the cofamily of the
+layer `IOF A` (domain/domain.lang). The layer has `ret`, `tau` and one
+constructor for each operation: `readLineOp`, `writeOp` and `argsOp`. It
+is not the `Sigma (o : Op) (Resp o -> X)` form above. S6 and S7 add one
+constructor for each new operation. `tau` is a step with no operation:
+`ioBind` gives a `tau` at the switch to `f a`, and `ioLoop` gives a `tau`
+at each round. The domain defs `ioPure`, `ioMap`, `ioBind` and `ioLoop`
+are guarded unfolds (Q4 and Q5).
+
 ### 6.2 The operations
 
 Each failure is a value: `Sum Text R` gives `inl` with an error text.
@@ -273,6 +282,17 @@ as data. The runtime uses the same evaluator as `langc eval`, so the
 erased (section 3). Alternative (O19 (b)): compile the core to C closures.
 That is faster, and it is a later slice when (a) is too slow.
 
+S5 note (Q7 and Q8 (a)): the executable does not hold the checked core
+as data. make embeds each runtime unit as preprocessed text (`tcc -E`)
+in build/runtime.c, and the program text is one more unit. At start, the
+console program checks the program text again (with the checker of
+`langc check`), then runs `main`. Thus langc needs no source tree at run
+time. libtcc writes `OUT` with TCC_OUTPUT_EXE. The refusal codes of
+`langc build` are BUILD_MAIN (no `main`), BUILD_MAIN_TYPE (`main` does
+not convert with `IO Unit`) and BUILD_TCC (a libtcc error). At a run
+time refusal, `OUT` writes the diagnostic on stderr, for example
+EVAL_FUEL, OOM or IO_WRITE.
+
 Exit status of `OUT`: 0 when `main` ends; 1 at a run time refusal (for
 example the arena limit). An operation failure is a value, not an exit.
 
@@ -289,7 +309,7 @@ document of the instances; it becomes `langc json` and stays as a test aid
 | S2 | The orbit-lang indexed families, mutual blocks and dependent eliminator: QIITs and HIITs. DONE 2026-10-19: rulings Q1 to Q9 = (a); `docs/STATUS.md`, section S2. |
 | S3 | The base span: remove the kit sample types that the request does not give, add `Text`, `Int64`, `Nat` (no bound), `Json` and `Log` with the section 5 operations. DONE 2026-10-20: rulings Q1 to Q9 = (a); `docs/STATUS.md`, section S3. |
 | S4 | Coinductive families: guarded `unfold`, lazy `out` (O4). DONE 2026-10-20: rulings Q1 to Q10 = (a); `docs/STATUS.md`, section S4. |
-| S5 | `IO`, the operation signature, `langc build` with libtcc, and the terminal operations 11 to 13. |
+| S5 | `IO`, the operation signature, `langc build` with libtcc, and the terminal operations 11 to 13. DONE 2026-10-20: rulings Q1 to Q12 = (a), Q-C1 = (a); gate examples 32, evals 163, json 32, path regressions 206, terminal 12; 13 of 13 mutants killed; `docs/STATUS.md`, section S5. |
 | S6 | The filesystem operations 2 to 10, tested in a new directory under `build/`. |
 | S7 | `ollama`, tested against a mock server in C that TinyCC builds, and a live probe when a local Ollama runs. |
 | S8 | Examples (a chat loop that keeps a `Log` transcript, a file organizer), mutants, docs. |
@@ -341,3 +361,20 @@ Each item gives the proposal first.
 - O19 Output: (a) libtcc in `langc`, the runtime evaluator in the
   executable; (b) the core compiled to C closures.
 - O20 The kit `build` verb: (a) rename it to `langc json`; (b) remove it.
+- O21 Bisimulation: (a) no path from a bisimulation; two unfolds convert
+  only when their steps and their seeds convert (S4 Q5); (b) a rule that
+  gives a path from a bisimulation.
+- O22 The arena at run time: (a) reclaim the arena between two
+  operations; (b) keep one arena for the whole run. Now (b) (S5 Q6 (a)):
+  the 1 GiB arena stays, and a long run can stop at the arena limit (OOM,
+  exit 1). The terminal test `spin` is a `tau` loop with no operation
+  (`unfold (fun (u : Unit) => tau Unit Unit u) unit`). It stops with
+  `OOM: main: the arena limit is reached` after about 1 s, before the
+  budget of 20000000 steps ends (S5 Q-C1 (a), STATUS D11). A reclaim at
+  each `tau` can give EVAL_FUEL for `spin`. A reclaim only at an
+  operation does not, because `spin` has no operation.
+- O23 The EVAL_FUEL text: (a) the text gives the budget of the run;
+  (b) the text gives EVAL_FUEL_STEPS. Now (b): the text says `more than
+  20000000 steps` at each budget, and `io_run` at budget 290 gives the
+  same text. Only the path regressions use a budget other than
+  EVAL_FUEL_STEPS (STATUS, S5 chunk B).

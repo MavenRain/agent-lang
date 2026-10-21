@@ -110,3 +110,14 @@ S3 shape.
 - An instance that holds a cofamily value stops the build with JSON_VALUE
   (`test/emit/codata.lang`, `held : Prod (Stream Nat) Nat`):
   `langc: JSON_VALUE: held: the instance holds a coinductive value, which has no JSON form`.
+
+## S5 shapes: IO
+
+S5 adds no JSON shape. `IO A` is a cofamily, thus the S4 rule applies to
+`IO` (S5 Q11). A def at an IO type is not in the document, and an
+instance that holds an IO value stops the build with JSON_VALUE. The
+golden `test/json/io.json` of `examples/io.lang` holds only the closed
+values: `noText`, `lines`, the 8 trace texts and the 4 Option values. The
+IO defs and the functions are not in it. The kit `build` verb is now
+`langc json PROG [-o OUT]` (O20 (a)). `langc build PROG -o OUT` writes a
+console program (`docs/PLAN.md`, section 7).

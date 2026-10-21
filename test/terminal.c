@@ -3,7 +3,8 @@
    fixture: langc builds build/term/NAME, the runner runs it with the lines
    of NAME.args as the arguments (no file: none) and NAME.in as the standard
    input (no file: /dev/null), and compares the standard output with
-   NAME.out and the exit code with the number. A code gives a refusal
+   NAME.out and the exit code with the number. If NAME.err exists, the
+   standard error must start with its text. A code gives a refusal
    fixture: langc builds into build/term/none/NAME, a directory that does
    not exist, and must exit 1 with "langc: CODE: " at the start of the
    standard error. The runner writes only under build/term/. */
@@ -135,6 +136,13 @@ static int run_fixture(const char *name, int code) {
   }
   if (got_len != want_len || memcmp(got, want, (size_t)want_len) != 0) {
     printf("FAIL terminal %s: the output differs from %s\n", name, path);
+    return 0;
+  }
+  snprintf(path, sizeof path, "test/term/%s.err", name);
+  want_len = slurp(path, want, sizeof want);
+  got_len = slurp(err, got, sizeof got);
+  if (want_len > 0 && (got_len < want_len || memcmp(got, want, (size_t)want_len) != 0)) {
+    printf("FAIL terminal %s: the standard error does not start with %s\n", name, path);
     return 0;
   }
   return 1;

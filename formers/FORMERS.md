@@ -115,6 +115,15 @@ that a host cannot satisfy makes the status PARTIAL or HOST-LIMIT.
   - Map: `map f t = bind (fun x => pure (f x)) t`.
 - For `Sum E`, `pure` is `inr`, and `bind f (inl e) = inl e`. For `List`,
   `bind` maps each element to a list and joins the lists in order.
+- At `IO A` (agent-lang S5 Q4): `pure`, `map` and `bind` elaborate to the
+  domain defs `ioPure A a`, `ioMap A B f t` and `ioBind A B t f`, guarded
+  unfolds. `bind` at `IO` needs `f : A -> IO B`. The laws are not
+  conversions at `IO`. `ioBind` gives one `tau` layer at the switch to
+  `f a`, `ioMap` is `ioBind` and `ioPure`, and two unfolds convert only
+  when their steps and their seeds convert (F7). Thus `bind f (pure a)`
+  gives `tau`, then the layers of `f a`. The laws hold for the effects:
+  the driver skips each `tau` layer, thus the two sides of a law run the
+  same operations in the same order.
 
 ### F6 Algebra fold
 
@@ -160,6 +169,14 @@ that a host cannot satisfy makes the status PARTIAL or HOST-LIMIT.
   change. Each `out` applies g one time. Two unfolds convert when their
   steps and their seeds convert. There is no eta and no path from a
   bisimulation.
+- `IO A` (agent-lang S5 Q1 and Q5) is the cofamily of the layer `IOF A`
+  (`ret`, `tau`, `readLineOp`, `writeOp`, `argsOp`). The domain def
+  `ioLoop S R body s : IO R` takes `body : S -> IO (Sum R S)`. It runs
+  `body s`: at `ret (inl r)` the loop ends with `r`, and at `ret (inr t)`
+  it gives a `tau` and the next round at `t`. Each round has a `tau`,
+  thus a round with no operation is also guarded (R3). The IO driver
+  applies `out` (1 fuel each) and starts the budget again at each
+  operation, thus a loop that reads input has no step bound.
 
 ### F8 Filterable filter
 

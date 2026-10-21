@@ -1,0 +1,2 @@
+-- bind runs the first write, then the second.
+def main : IO Unit := bind (write "a\n") (fun (u : Unit) => write "b\n")

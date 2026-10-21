@@ -1,0 +1,2 @@
+-- Writes the JSON text of the arguments after the program name.
+def main : IO Unit := bind args (fun (j : Json) => write (textAppend "hello " (textAppend (jsonRender j) "\n")))

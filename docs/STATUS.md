@@ -1044,3 +1044,108 @@ the 11 runs, `make -B check` passes at the gate counts and the tree is
   goes on to libtcc, and build/term/none/ does not exist (D7).
 - M13: the kickoff names the terminal row args (chunk C). The chunk B
   fixture hello reads args, and it kills M13.
+
+### Chunk C:  examples, terminal tests, mutants and docs
+
+Chunk C adds examples/io.lang, the IO evals, the io golden, 8 terminal
+rows and 2 path regressions. examples/io.lang has echo (`ioLoop` of
+`echoRound`), greet (`args`), count (`countLines` by `map` in
+`countRound`, then `bind` to write the number) and twoWrites. The guest
+helper `trace A n ins m` gives the JSON text of the layers of `m` (ret,
+tau, read, args, the write text, and `...` when it reads n layers).
+`result A n ins m` gives the value at `ret`. The 12 eval rows are
+readLineTrace, readLineValue, endOfInput, writeTrace, argsTrace,
+bindOrder, mapValue, echoTrace, echoCut, countValue, countTrace and
+greetTrace. Each layer agrees with the domain defs: `ioBind` gives a
+`tau` at the switch to `f a`, and `ioLoop` gives a `tau` at each round.
+Thus echo of 2 lines is read, tau, p, tau, tau, read, tau, q, tau, tau,
+read, tau, ret. The golden test/json/io.json holds the closed values
+(noText, lines, the 8 trace texts and the 4 Option values). The IO defs
+and the functions are not in it. The terminal rows are echo (`ab`, an
+empty line, `cd`), end-of-input (no NAME.in, writes `none`), no-newline
+(`ab\nxy` gives `ab\nxy\n`), args (3 arguments, one with a space and one
+with quotes), empty-input (an empty NAME.in), two-writes (`a\nb\n`),
+lines-1000 (`line 1` to `line 1000`, made one time with awk) and spin
+(exit 1, spin.err). The path regressions 205 and 206 are `the ioBind
+effect order` (a bind of two writes gives `ab`) and `ioLoop of 1000
+rounds` (io_echo_loop, 1000 lines of `ab`, budget 300).
+
+| Suite | Count |
+|---|---|
+| examples | 32 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 81 |
+| evals | 163 |
+| json | 32 |
+| json refusals | 4 |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 206 checked, 0 failed |
+| terminal | 12 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. The dash sweep of the chunk C
+paths is empty. The terminal runner passes in the sandbox. It writes
+only under build/term/.
+
+Edit sites (40 paths):
+
+- examples/io.lang (new): echo, greet, count, twoWrites and the guest
+  helpers `trace` and `result`.
+- test/eval/expect.txt: the 12 rows `io ...`.
+- test/json/io.json (new): the golden of examples/io.lang.
+- test/term/ (30 new files): the run fixtures echo, end-of-input,
+  no-newline, args, empty-input, two-writes, lines-1000 and spin (.lang,
+  .out and .code, and .in, .args or .err when the row needs it).
+- test/terminal.c: an optional NAME.err (D10).
+- test/path-regressions.c: the helper `io_loop_rounds` and the cases 205
+  and 206.
+- docs/PLAN.md: the section 6.1 note of Q2, the section 7 note of Q8, the
+  row S5 in section 8, and O21, O22 and O23 in section 9.
+- formers/FORMERS.md: the IO case of F5 and of F7. formers/tcc-json.md:
+  the S5 shapes. README.md: the console programs. docs/STATUS.md: this
+  block.
+
+Deviations:
+
+- D10: terminal.c reads an optional NAME.err. The standard error of the
+  run must start with its text. The s3 prompt asked for EVAL_FUEL on
+  stderr, and run_fixture did not read stderr.
+- D11: spin gives OOM, not EVAL_FUEL. spin is
+  `unfold (fun (u : Unit) => tau Unit Unit u) unit`. Its standard error
+  is `langc: OOM: main: the arena limit is reached`: the arena fills in
+  about 1 s, before 20000000 steps. spin.err holds the full diagnostic line.
+  The USER ruling Q-C1 (a) keeps this with no code change, and O22 has
+  the note (a reclaim at each `tau` can give EVAL_FUEL).
+- D12: the S4 ruling names the open item O21, but section 9 did not have
+  it. Chunk C adds O21 before O22. The EVAL_FUEL text of the chunk B
+  observation is the new item O23, not a part of O22.
+- D13: test/term has 30 new files, not 32. end-of-input and two-writes
+  have no NAME.in. Thus chunk C part 1 has 35 paths, not 37.
+
+Mutants (kickoff section 4). The run did `git add` of the 35 chunk C
+paths first (staged tree 0515e274) and `make -B` for each rebuild. After
+each run, it restored the file and examined `git diff`. After the 2
+runs, `make -B check` passes at the gate counts and the tree is 0515e274.
+
+| Id | File | Edit | First killer | Result |
+|---|---|---|---|---|
+| M7 | src/runtime/driver.c | stop at `tau` as at `ret` | path regression echo (status 0, 0 bytes) | KILLED |
+| M8 | src/front/check.c | `rule_bind` elaborates to `ioMap` | gate.sh eval io bindOrder | KILLED |
+
+- M7: io_echo is `bind readLine ...`, thus a `tau` comes before its
+  write. The chunk B case echo runs before the new cases. 8 of the 206
+  path regressions fail, `the ioBind effect order` and `ioLoop of 1000
+  rounds` among them.
+- M8: the mutant elaborates `bind t f` at IO to `ioMap A (IO B) f t` and
+  keeps the type `IO B`. examples/io.lang checks. bindOrder gives
+  `["a","tau","ret"]` in place of `["a","tau","b","ret"]`. gate.sh has 6
+  failures: bindOrder, echoTrace, echoCut, countTrace, greetTrace and
+  json examples/io.lang.
+
+S5 close: chunks A, B and C are in, with the rulings Q1 to Q12 = (a) and
+Q-C1 = (a). 13 of 13 mutants are KILLED (M1 to M6 and M9 to M13 in chunk
+B, M7 and M8 in chunk C). The final gate is examples 32, parse refusals
+14, check refusals 81, evals 163, json 32, json refusals 4, `gate: 0
+failures`, regressions 6, printer regressions 2, path regressions 206
+and terminal 12. The next slice is S6 (the filesystem operations 2 to
+10, docs/PLAN.md section 8).

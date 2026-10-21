@@ -202,6 +202,16 @@ static int io_segment_budget(void) {
   return io_driver_case("a small budget for each segment", io_echo_loop, input, 0, NULL, 1000, input, 0, NULL);
 }
 
+/* 1000 rounds of ioLoop at a budget of 300: the cost of a segment does not
+   grow with the rounds (S5 chunk C). */
+static int io_loop_rounds(void) {
+  static char input[3001];
+  unsigned i;
+  input[0] = '\0';
+  for (i = 0; i < 1000u; i++) strcat(input, "ab\n");
+  return io_driver_case("ioLoop of 1000 rounds", io_echo_loop, input, 0, NULL, 300, input, 0, NULL);
+}
+
 static int big_fold_fuel(void) {
   Arena arena;
   Machine m;
@@ -1223,6 +1233,9 @@ int main(void) {
     failed += !io_segment_budget();
     failed += !io_driver_case("the tau loop trap", "def main : IO Unit := unfold (fun (u : Unit) => tau Unit Unit u) unit\n", "",
       0, NULL, 1000, "", 1, "EVAL_FUEL");
+    failed += !io_driver_case("the ioBind effect order",
+      "def main : IO Unit := bind (write \"a\") (fun (u : Unit) => write \"b\")\n", "", 0, NULL, EVAL_FUEL_STEPS, "ab", 0, NULL);
+    failed += !io_loop_rounds();
   }
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;

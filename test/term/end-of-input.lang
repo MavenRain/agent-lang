@@ -1,0 +1,2 @@
+-- Writes none at the end of the input (no NAME.in: /dev/null).
+def main : IO Unit := bind readLine (fun (r : Option Text) => option (write "none\n") (fun (t : Text) => write (textAppend t "|\n")) r)
