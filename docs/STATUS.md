@@ -901,3 +901,146 @@ staged checker. `make check` passes, with 197 path regressions and no
 failures. The same 197 cases pass with AddressSanitizer and
 UndefinedBehaviorSanitizer. Validation ran serially in one isolated index
 snapshot. Both findings are fixed; no blockers remain.
+
+### Chunk B:  driver, console runtime and build
+
+Chunk B adds the IO driver, the runtime of a console program and the
+console build. src/runtime/driver.c `io_run` runs an IO value. Each `out`
+spends 1 fuel. The budget EVAL_FUEL_STEPS starts again after each
+operation (Q6 (a)). At `ret`, the status is 0. At `tau t`, the driver
+continues with `t`. readLine gives the line without its newline, or
+`none` at the end of the input. write writes the bytes, then flushes
+them; a write error is IO_WRITE. args gives a JSON array of the
+arguments after the program name. src/runtime/rt_main.c is the main of a
+console program. It loads the embedded domain and program text, checks
+the program, finds `main` and runs it. It exits 0 at `ret`, or 1 with
+the diagnostic on stderr. src/build.c gives `langc build PROG -o OUT`
+(Q7 and Q8 (a)). It refuses a program with no `main` (BUILD_MAIN) and a
+`main` that does not convert with `IO Unit` (BUILD_MAIN_TYPE). Then
+libtcc compiles the runtime units and one unit with the program text
+into an executable. A libtcc error is BUILD_TCC. The kit `build` verb is
+now `langc json PROG [-o OUT]` (Q9 (a), O20 (a)). test/terminal.c
+(Q10 (a)) builds each test/term fixture with `langc build`, runs it and
+compares the output and the exit code. A refusal fixture compares the
+langc code. make check runs test/terminal.c last.
+
+| Suite | Count |
+|---|---|
+| examples | 31 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 81 |
+| evals | 151 |
+| json | 31 |
+| json refusals | 4 |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 204 checked, 0 failed |
+| terminal | 4 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. It now also reads rt_main.c and
+test/terminal.c. The dash sweep of the 30 chunk B paths is empty. The
+terminal runner passes in the sandbox. It writes only under build/term/.
+
+The USER commit 4350c48 (`Add console builds and terminal runtime (S5
+chunk B)`) adds quotes to the two `$(TCC_HOME)` paths in the Makefile
+(the `-I` flag and libtcc.a). The mutant runs used the staged tree
+013f19eb, which has no quotes. `make -B check` on 4350c48 gives the
+counts above.
+
+Edit sites (30 paths):
+
+- src/front/eval.c and core.h: `eval_out` and `eval_apply`, the exported
+  wrappers of `reduce_out` and `apply_value`.
+- src/runtime/driver.c and driver.h (new): `io_run`.
+- src/runtime/rt_main.c (new): the main of a console program.
+- src/build.c and build.h (new): the main type test and `console_build`.
+- src/main.c: the `json` verb (was `build`) and the `build` verb, with
+  `-o` required. src/json.h: the verb name in the comment.
+- gen/embed.c: the `-r` mode. It writes build/runtime.c from the
+  `tcc -E` output of each runtime unit (build/rt/, 12 units).
+- Makefile: DRIVER, TCC_HOME, TCC_FLAGS and RUNTIME; the rules
+  build/runtime.c, build/runtime.o and build/terminal; the link of langc
+  with `$(CC)` and libtcc.a (D5); `$(TCC_FLAGS)`, rt_main.c and
+  test/terminal.c in check-clang. make check gives CC, TCC and TCC_HOME
+  to test/regressions.js and runs build/terminal last.
+- test/terminal.c (new) and test/term/ (10 files): the run fixture hello
+  (.lang, .args, .out and .code), and the refusal fixtures no-main
+  (BUILD_MAIN), main-type (BUILD_MAIN_TYPE) and tcc-out (BUILD_TCC)
+  (.lang and .code).
+- test/path-regressions.c: the helpers `io_driver_run`,
+  `io_driver_case`, `io_write_bytes` and `io_segment_budget`, the
+  sources `io_echo` and `io_echo_loop`, and cases 198 to 204 (echo, end
+  of input, a last line with no newline, args, the write bytes, a small
+  budget for each segment, the tau loop trap).
+- test/gate.sh, test/regressions.js and test/printer-regressions.js: the
+  `json` verb, and the gate lines `json: N checked` and
+  `json refusals: N checked` (D9). test/regressions.js: the
+  `domainCompiler` link (D5).
+- docs/host/README.md (5 sites), docs/host/CAPABILITY.md (2),
+  domain/README.md (1) and formers/tcc-json.md (2): the `json` verb.
+
+Deviations:
+
+- D5: ~/.local/lib/libtcc.a holds Mach-O arm64 objects (clang built
+  it), and the tcc linker reads only ELF objects. Thus `$(CC)` links
+  build/langc. The `domainCompiler` of test/regressions.js linked
+  src/main.c with tcc, without build.c and driver.c, but main.c now calls
+  `console_build`. A new rule build/runtime.o (`$(CC) $(CFLAGS) -c`)
+  gives one runtime object. langc and each domain compiler link it with
+  `$CC`, src/build.c, src/runtime/driver.c and libtcc.a. The `build` verb
+  of a domain compiler has the default domain in its runtime. The domain
+  compiler tests use only `check` and `json`.
+- D6: the precondition drift. The USER commit of chunk A is 0d002ec
+  (tree 7f164f67), with the staged review block. Thus the base is 197
+  path regressions, not 179. The chunk B targets are path regressions
+  204 (197 + 7; the kickoff row B has 186) and terminal 4.
+- D7: the refusal fixtures build into build/term/none/NAME. terminal.c
+  does not make build/term/none/. Thus libtcc cannot write the output of
+  tcc-out, and the code is BUILD_TCC (the libtcc text starts with
+  `could not write`).
+- D8: on macOS, a `fmemopen` stream in mode "r" accepts writes (fwrite
+  gives 4, fflush gives 0). The write error regression uses /dev/null,
+  opened for reading (fwrite gives 0).
+- D9: the `json` rename also changes test/printer-regressions.js (not in
+  the s2 list). The gate line `json: N builds checked` is now
+  `json: N checked`. These stay as they are: the plan text of Q9 and O20
+  in docs/PLAN.md, the history in docs/STATUS.md, formers/FORMERS.md:283
+  (`langc build --js` of the tcc-js host) and design/DESIGN.md.
+
+Observation (no fix): the EVAL_FUEL text says `more than 20000000
+steps` at each budget. `io_run` at budget 290 gives the same text. Only
+the path regressions use a budget other than EVAL_FUEL_STEPS. Chunk C
+records this as a note or an O item.
+
+Probes: `langc build` of `def main : IO Unit := write "hi\n"` gives an
+executable that writes `hi\n` and exits 0. One echo round of `ioLoop`
+costs at most 290 fuel: 290 is the smallest budget that passes, for 1
+line and for 100 lines. The segment budget regression uses 1000.
+
+Mutants (kickoff section 4). Each run did `git add` first and `make -B`
+for each rebuild, then restored the file and examined `git diff`. After
+the 11 runs, `make -B check` passes at the gate counts and the tree is
+013f19eb.
+
+| Id | File | Edit | First killer | Result |
+|---|---|---|---|---|
+| M1 | src/runtime/driver.c | readLine gives `some ""` at the end of the input | path regression end of input | KILLED |
+| M2 | src/runtime/driver.c | readLine keeps the `\n` | path regression echo | KILLED |
+| M3 | src/runtime/driver.c | write writes `len - 1` bytes | path regression echo | KILLED |
+| M4 | src/runtime/driver.c | args starts at argv[0] | path regression args | KILLED |
+| M5 | src/runtime/driver.c | no budget reset at an operation | path regression a small budget for each segment | KILLED |
+| M6 | src/runtime/driver.c | `ret` gives status 1 | path regression echo (status 1) | KILLED |
+| M7 | src/runtime/driver.c | stop at `tau` as at `ret` | path regression the `ioBind` effect order | chunk C |
+| M8 | src/front/check.c | `rule_bind` elaborates to `ioMap` | gate.sh examples/io.lang | chunk C |
+| M9 | src/build.c | TCC_OUTPUT_MEMORY in place of TCC_OUTPUT_EXE | terminal hello (exit -1) | KILLED |
+| M10 | src/build.c | an empty program unit | terminal hello (exit 1) | KILLED |
+| M11 | src/main.c | `json` runs CMD_CHECK | gate.sh json examples/algebra.lang | KILLED |
+| M12 | src/build.c | the main type test accepts each type | terminal main-type | KILLED |
+| M13 | src/runtime/rt_main.c | `io_run` gets argv + 2 | terminal hello (the output) | KILLED |
+
+- M3: the first killer is the path regression echo. It runs before the
+  write bytes case in main. The kickoff names write bytes.
+- M12: main-type gives BUILD_TCC in place of BUILD_MAIN_TYPE. Its build
+  goes on to libtcc, and build/term/none/ does not exist (D7).
+- M13: the kickoff names the terminal row args (chunk C). The chunk B
+  fixture hello reads args, and it kills M13.
