@@ -1348,3 +1348,78 @@ after each restore. Under M7 the total was 126562507685888 (256 times
 the real total:  `f_bsize` 1048576, `f_frsize` 4096).
 
 7 of 7 S6a mutants KILLED.
+
+## S6b:  the filesystem write operations (2026-10-21)
+
+### Chunk A:  layer and check
+
+Chunk A adds the layer of the write operations 3, 5, 7 and 9 (S6 Q1,
+Q2 and Q15 (a)). domain/domain.lang adds 4 constructors to IOF after
+`diskUsageOp`, in the operation order:  `makeDirOp`, `moveOp`, `copyOp`
+and `trashOp` (10 fields). Thus each S6a fold arm keeps its place. It
+adds the defs `makeDir`, `move`, `copy` and `trash` (each at
+`Sum Text Unit`) in the form of `args` after `diskUsage`, and the 4 arms
+in each leg of `ioBind` and in `ioLoop`. Each fold over IOF now takes 14
+functions, then the target. examples/io.lang adds the 4 arms in `layers`
+and `result`. Each arm gives the fixed response `inr unit`. The 4 trace
+defs bind the operation into a `write` of the response (`showUnit` gives
+`unit`). driver.c does not change (chunk B).
+
+| Suite | Count |
+|---|---|
+| examples | 33 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 86 |
+| evals | 176 |
+| json | 33 |
+| json refusals | 4 |
+| gate | 0 failures |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 239 checked, 0 failed |
+| terminal | 17 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. The dash sweep is empty.
+
+The name probe tested the 18 names (4 defs, 4 constructors, 10 fields)
+against `RESERVED` (`{"Bool"}`), the domain, the quoted core names in
+src/front and the guest defs in examples/ and test/:  no hit.
+
+Edit sites:
+
+- domain/domain.lang:  the IOF line, its comment, the IO monad comment,
+  the 4 defs after `diskUsage`, `ioBind` (2 legs) and `ioLoop`.
+- examples/io.lang:  the comment, `layers`, `result`, `showUnit` and the
+  4 trace defs. test/eval/expect.txt:  4 rows. test/json/io.json:  the 4
+  trace texts (the S6a text is an exact prefix of the new text).
+- test/check:  io-move-nat.lang (`expected a term of type Text, found a
+  term of type Nat`) and io-makedir-bind.lang (`the binder type Json
+  differs from the expected type Sum Text Unit`), each TYPE_MISMATCH.
+- test/path-regressions.c:  the 4 new arms in each of the 6 guest folds
+  over `out`, the budget of `ioLoop of 1000 rounds` and
+  `FS_SEGMENT_BUDGET` (D2, D3). The 3 refusal cases of the guest folds
+  again give `expected a term of type Type 0, found a term of type
+  Type 1`.
+
+Budgets (one runner script under $TMPDIR each;  the probe binary reads
+the budget from the environment and bisects):
+
+| Row | S6a minimum | S6b A minimum | Budget |
+|---|---|---|---|
+| `ioLoop of 1000 rounds` | 330 | 362 (361 gives EVAL_FUEL) | 372 |
+| `layer 3 operations at one segment` | 271 | 295 (294 gives EVAL_FUEL) | 305 |
+
+| Id | Deviation |
+|---|---|
+| D1 | Precondition:  HEAD 71b0895 (USER, on a3b31e0) has the tree f838339c, not the staged tree fc0246e4. The USER changed README.md, docs/PLAN.md and formers/tcc-json.md (the error text forms of the input validation) before the commit. The difference is in docs only, thus the build went on. |
+| D2 | The prompt names only the budget of `ioLoop of 1000 rounds`. The 4 new constructors also make `layer 3 operations at one segment` (`FS_SEGMENT_BUDGET` 281, S6a B D11) stop at EVAL_FUEL. A probe of the same form gives the minimum 295 (S6a 271 + 24:  3 operations through `ioBind`). The budget is now 305 (the minimum + 10). |
+| D3 | The `ioLoop` minimum is 362 (S6a 330 + 32:  8 fuel for each new constructor in the folds of one round, as kickoff 1.6 gives). The budget is now 372 (the minimum + 10). |
+| D4 | The response text of a write operation in the traces is `unit` (`showUnit`). The kickoff and the prompt name no text. |
+
+| Id | Mutant | Killer |
+|---|---|---|
+| M8 | `copy`:  `copyOp ... t f` (from and to swapped) | gate.sh `FAIL eval io copyTrace` (KILLED) |
+
+M8 ran after `git add`, with `make -B check`, and was restored with
+`git checkout -- domain/domain.lang` (`git diff --quiet` gives 0). M9 to
+M13 run in S6b chunk C (driver mutants).

@@ -126,7 +126,7 @@ static int io_deep_type(void) {
   for (i = 0; i < 240u; i++) strcat(source, "Unit -> ");
   strcat(source,
     "Nat\n"
-    "def good : T -> Nat := fun (x : T) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
+    "def good : T -> Nat := fun (x : T) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p k => 0) (fun p q k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
   arena_init(&arena, (size_t)128 << 20);
   ok = checked(&arena, &m, &diag, source);
   if (!ok) {
@@ -208,8 +208,9 @@ static int io_write_bytes(void) {
    the input. */
 static const char io_echo[] =
   "def main : IO Unit := bind readLine (fun (r : Option Text) => option (write \"none\") (fun (t : Text) => write (textAppend t \"|\")) r)\n";
-/* Echoes each line until the end of the input. One round takes at most 330
-   fuel (290 at S5: each IOF constructor adds 8 to the folds of a round). */
+/* Echoes each line until the end of the input. One round takes at most 362
+   fuel (290 at S5, 330 at S6a: each IOF constructor adds 8 to the folds of
+   a round). */
 static const char io_echo_loop[] =
   "def main : IO Unit := ioLoop Unit Unit (fun (u : Unit) => bind readLine (fun (r : Option Text) => option (ioPure (Sum Unit Unit) (inl unit)) (fun (t : Text) => ioMap Unit (Sum Unit Unit) (fun (x : Unit) => inr x) (write (textAppend t \"\\n\"))) r)) unit\n";
 
@@ -221,14 +222,14 @@ static int io_segment_budget(void) {
   return io_driver_case("a small budget for each segment", io_echo_loop, input, 0, NULL, 1000, input, 0, NULL);
 }
 
-/* 1000 rounds of ioLoop at a budget of 340: the cost of a segment does not
+/* 1000 rounds of ioLoop at a budget of 372: the cost of a segment does not
    grow with the rounds (S5 chunk C). */
 static int io_loop_rounds(void) {
   static char input[3001];
   unsigned i;
   input[0] = '\0';
   for (i = 0; i < 1000u; i++) strcat(input, "ab\n");
-  return io_driver_case("ioLoop of 1000 rounds", io_echo_loop, input, 0, NULL, 340, input, 0, NULL);
+  return io_driver_case("ioLoop of 1000 rounds", io_echo_loop, input, 0, NULL, 372, input, 0, NULL);
 }
 
 /* The filesystem rows (S6a chunk B). The runner runs from the repo root,
@@ -412,7 +413,7 @@ static const char fs_three_ops[] =
   "def main : IO Unit := bind (diskUsage \"" FS_R "\") (fun (a : Sum Text Json) => bind (readFile \"" FS_R "/files/empty.txt\")"
   " (fun (b : Sum Text Text) => bind (listDir \"" FS_R "/empty\") (fun (c : Sum Text Json) => write \"ok\")))\n";
 /* The budget of the 3 operation row: the probe minimum + 10 (STATUS D-row). */
-#define FS_SEGMENT_BUDGET 281
+#define FS_SEGMENT_BUDGET 305
 
 /* The 33 read rows over one tree (kickoff row S6a B). Gives the count of
    the failed rows (and 1 more when the tree fails). */
@@ -1479,15 +1480,15 @@ int main(void) {
   failed += !io_domain_case("IO: missing bind helper", "",
     "def bad : IO Nat := bind base (fun (n : Nat) => base)\n", "NAME_UNKNOWN");
   failed += !domain_refuses("IO: inferred map result must inhabit Type 0", "",
-    "def bad : Nat := fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => Nat) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
+    "def bad : Nat := fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p k => 0) (fun p q k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => Nat) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
   failed += !domain_refuses("IO: an inferred function type can also be too large", "",
-    "def bad : Nat := fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => fun (T : Type 0) => T) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
+    "def bad : Nat := fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p k => 0) (fun p q k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => fun (T : Type 0) => T) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
   failed += !domain_refuses("IO: neutral map result keeps its universe", "",
-    "def bad : (T : Type 1) -> T -> Nat := fun (T : Type 1) (x : T) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
+    "def bad : (T : Type 1) -> T -> Nat := fun (T : Type 1) (x : T) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p k => 0) (fun p q k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
   failed += !accepts("IO: map infers a neutral small result type",
-    "def good : (F : Nat -> Type 0) -> (k : Nat) -> F k -> Nat := fun (F : Nat -> Type 0) (k : Nat) (x : F k) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
+    "def good : (F : Nat -> Type 0) -> (k : Nat) -> F k -> Nat := fun (F : Nat -> Type 0) (k : Nat) (x : F k) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p k => 0) (fun p q k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
   failed += !accepts("IO: a shadowed type binder keeps its original level",
-    "def good : (A : Type 0) -> A -> (A : Type 0) -> Nat := fun (A : Type 0) (x : A) (A : Type 0) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
+    "def good : (A : Type 0) -> A -> (A : Type 0) -> Nat := fun (A : Type 0) (x : A) (A : Type 0) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p q k => 0) (fun p k => 0) (fun p k => 0) (fun p q k => 0) (fun p q k => 0) (fun p k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
   failed += !accepts("IO: map and bind propagate the IO hint to pure",
     "def good : IO Nat := map (fun (n : Nat) => natAdd n 1) (pure 7)\n"
     "def bound : IO Nat := bind (pure 7) (fun (n : Nat) => pure n)\n");

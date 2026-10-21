@@ -1,0 +1,3 @@
+-- makeDir gives Sum Text Unit (S6 Q2 (a)): bind of makeDir into a function
+-- at Json is refused.
+def wrong : IO Unit := bind (makeDir "d/new") (fun (j : Json) => write (jsonRender j))

@@ -1,0 +1,3 @@
+-- move takes the source and the destination as Text (S6 Q1 (a)): a Nat
+-- destination is refused.
+def wrong : IO (Sum Text Unit) := move "d/a.txt" 7

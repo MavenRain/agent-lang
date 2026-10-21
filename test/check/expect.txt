@@ -82,3 +82,5 @@ io-write-arg.lang TYPE_MISMATCH
 io-listdir-nat.lang TYPE_MISMATCH
 io-find-arity.lang TYPE_MISMATCH
 io-readfile-bind.lang TYPE_MISMATCH
+io-move-nat.lang TYPE_MISMATCH
+io-makedir-bind.lang TYPE_MISMATCH
