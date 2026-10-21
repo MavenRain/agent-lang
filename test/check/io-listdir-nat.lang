@@ -1,0 +1,2 @@
+-- listDir takes the path as Text (S6 Q1 (a)): a Nat path is refused.
+def wrong : IO (Sum Text Json) := listDir 7

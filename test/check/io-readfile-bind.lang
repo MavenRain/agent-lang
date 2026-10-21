@@ -1,0 +1,3 @@
+-- readFile gives Sum Text Text (S6 Q2 (a)): bind of readFile into a function
+-- at Json is refused.
+def wrong : IO Unit := bind (readFile "d/a.txt") (fun (j : Json) => write (jsonRender j))

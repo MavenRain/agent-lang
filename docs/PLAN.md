@@ -138,6 +138,21 @@ builds and runs each test program in build/term/.  Q11: the JSON rule of
 S4 Q7 applies to `IO`.  Q12: the slice order of section 8 does not
 change.
 
+### USER ruling (S6)
+
+Ruled 2026-10-20 (S6 kickoff, agent-lang-work/S6-kickoff.md, outside the
+repo).  The USER gave no letter, thus each Q is the default (a).
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a Q10=a Q11=a Q12=a Q13=a Q14=a Q15=a Q16=a
+
+Q1: one IOF constructor for each operation.  Q2: the PLAN 6.2 result
+types.  Q3: O13 (a), lstat then rename.  Q4: at EXDEV copy, then remove
+the source.  Q5: O14 (a).  Q6: O15 (a).  Q7: io_run takes IoEnv; the
+trash root from HOME.  Q8: O16 (a).  Q9: O10 (a).  Q10: byte order.
+Q11: no link is followed in a walk.  Q12: `NAME: PATH: strerror`.
+Q13: build/fs/pr/ and build/fs/term/.  Q14: one arena.  Q15: S6a, then
+S6b.  Q16: the kinds file, dir, link, other; paths under the root.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |
@@ -310,7 +325,8 @@ document of the instances; it becomes `langc json` and stays as a test aid
 | S3 | The base span: remove the kit sample types that the request does not give, add `Text`, `Int64`, `Nat` (no bound), `Json` and `Log` with the section 5 operations. DONE 2026-10-20: rulings Q1 to Q9 = (a); `docs/STATUS.md`, section S3. |
 | S4 | Coinductive families: guarded `unfold`, lazy `out` (O4). DONE 2026-10-20: rulings Q1 to Q10 = (a); `docs/STATUS.md`, section S4. |
 | S5 | `IO`, the operation signature, `langc build` with libtcc, and the terminal operations 11 to 13. DONE 2026-10-20: rulings Q1 to Q12 = (a), Q-C1 = (a); gate examples 32, evals 163, json 32, path regressions 206, terminal 12; 13 of 13 mutants killed; `docs/STATUS.md`, section S5. |
-| S6 | The filesystem operations 2 to 10, tested in a new directory under `build/`. |
+| S6a | The filesystem read operations 2, 4, 6, 8 and 10 (`listDir`, `find`, `readFile`, `search`, `diskUsage`), tested in `build/fs/`.  Chunk A: the layer and the check refusals.  Chunk B: the driver and the path regressions.  Chunk C: the examples, the terminal rows, the mutants and the docs. |
+| S6b | The filesystem write operations 3, 5, 7 and 9 (`makeDir`, `move`, `copy`, `trash`), tested in `build/fs/`, with the chunks A, B and C of S6a. |
 | S7 | `ollama`, tested against a mock server in C that TinyCC builds, and a live probe when a local Ollama runs. |
 | S8 | Examples (a chat loop that keeps a `Log` transcript, a file organizer), mutants, docs. |
 

@@ -67,12 +67,16 @@ cofamily Mealy (I : Type 0) (O : Type 0) := MealyF I O
 -- IO (S5, Q1 and Q2 (a)): the cofamily of the layer IOF A, an interaction
 -- tree with a silent step. ret ends the run with a value, tau is a step
 -- with no operation, and each other constructor is one terminal operation
--- with its continuation. S6 and S7 add a constructor for each operation.
-family IOF (A : Type 0) (X : Type 0) := ret (retValue : A) | tau (tauNext : X) | readLineOp (readLineNext : Option Text -> X) | writeOp (writeText : Text) (writeNext : X) | argsOp (argsNext : Json -> X)
+-- with its continuation. S6a adds the read operations listDirOp, findOp,
+-- readFileOp, searchOp and diskUsageOp (S6 Q1 (a)). S6b and S7 add a
+-- constructor for each other operation.
+family IOF (A : Type 0) (X : Type 0) := ret (retValue : A) | tau (tauNext : X) | readLineOp (readLineNext : Option Text -> X) | writeOp (writeText : Text) (writeNext : X) | argsOp (argsNext : Json -> X) | listDirOp (listDirPath : Text) (listDirNext : Sum Text Json -> X) | findOp (findRoot : Text) (findGlob : Text) (findNext : Sum Text Json -> X) | readFileOp (readFilePath : Text) (readFileNext : Sum Text Text -> X) | searchOp (searchRoot : Text) (searchText : Text) (searchNext : Sum Text Json -> X) | diskUsageOp (diskUsagePath : Text) (diskUsageNext : Sum Text Json -> X)
 cofamily IO (A : Type 0) := IOF A
 -- The IO monad (Q4 and Q5 (a)), by guarded unfolds. ioPure gives ret at
--- once. readLine, write and args give one operation layer, then ret with
--- the response; the state none is the step before the operation. ioBind
+-- once. readLine, write, args, listDir, find, readFile, search and
+-- diskUsage give one operation layer, then ret with the response; the
+-- state none is the step before the operation. A filesystem response is
+-- inl with the error text or inr with the value (S6 Q2 (a)). ioBind
 -- runs m, then f at the value of m: the state inl m copies each layer of
 -- m, ret a gives tau at the switch to f a, and the state inr n copies each
 -- layer of n. ioMap is ioBind and ioPure. ioLoop runs body at the state s:
@@ -85,16 +89,35 @@ def write : Text -> IO Unit :=
   fun (t : Text) => unfold (fun (s : Option Unit) => option (writeOp Unit (Option Unit) t (some unit)) (fun (u : Unit) => ret Unit (Option Unit) u) s) none
 def args : IO Json :=
   unfold (fun (s : Option Json) => option (argsOp Json (Option Json) (fun (j : Json) => some j)) (fun (j : Json) => ret Json (Option Json) j) s) none
+def listDir : Text -> IO (Sum Text Json) :=
+  fun (p : Text) => unfold (fun (s : Option (Sum Text Json)) => option (listDirOp (Sum Text Json) (Option (Sum Text Json)) p (fun (r : Sum Text Json) => some r)) (fun (r : Sum Text Json) => ret (Sum Text Json) (Option (Sum Text Json)) r) s) none
+def find : Text -> Text -> IO (Sum Text Json) :=
+  fun (r : Text) (g : Text) => unfold (fun (s : Option (Sum Text Json)) => option (findOp (Sum Text Json) (Option (Sum Text Json)) r g (fun (v : Sum Text Json) => some v)) (fun (v : Sum Text Json) => ret (Sum Text Json) (Option (Sum Text Json)) v) s) none
+def readFile : Text -> IO (Sum Text Text) :=
+  fun (p : Text) => unfold (fun (s : Option (Sum Text Text)) => option (readFileOp (Sum Text Text) (Option (Sum Text Text)) p (fun (r : Sum Text Text) => some r)) (fun (r : Sum Text Text) => ret (Sum Text Text) (Option (Sum Text Text)) r) s) none
+def search : Text -> Text -> IO (Sum Text Json) :=
+  fun (r : Text) (t : Text) => unfold (fun (s : Option (Sum Text Json)) => option (searchOp (Sum Text Json) (Option (Sum Text Json)) r t (fun (v : Sum Text Json) => some v)) (fun (v : Sum Text Json) => ret (Sum Text Json) (Option (Sum Text Json)) v) s) none
+def diskUsage : Text -> IO (Sum Text Json) :=
+  fun (p : Text) => unfold (fun (s : Option (Sum Text Json)) => option (diskUsageOp (Sum Text Json) (Option (Sum Text Json)) p (fun (r : Sum Text Json) => some r)) (fun (r : Sum Text Json) => ret (Sum Text Json) (Option (Sum Text Json)) r) s) none
 def ioBind : (A : Type 0) -> (B : Type 0) -> IO A -> (A -> IO B) -> IO B :=
   fun (A : Type 0) (B : Type 0) (m : IO A) (f : A -> IO B) => unfold (fun (s : Sum (IO A) (IO B)) => either
-    (fun (x : IO A) => fold (fun (a : A) => tau B (Sum (IO A) (IO B)) (inr (f a))) (fun (t : IO A) => tau B (Sum (IO A) (IO B)) (inl t)) (fun (k : Option Text -> IO A) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inl (k r))) (fun (w : Text) (n : IO A) => writeOp B (Sum (IO A) (IO B)) w (inl n)) (fun (k : Json -> IO A) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inl (k j))) (out x))
-    (fun (y : IO B) => fold (fun (b : B) => ret B (Sum (IO A) (IO B)) b) (fun (t : IO B) => tau B (Sum (IO A) (IO B)) (inr t)) (fun (k : Option Text -> IO B) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inr (k r))) (fun (w : Text) (n : IO B) => writeOp B (Sum (IO A) (IO B)) w (inr n)) (fun (k : Json -> IO B) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inr (k j))) (out y)) s) (inl m)
+    (fun (x : IO A) => fold (fun (a : A) => tau B (Sum (IO A) (IO B)) (inr (f a))) (fun (t : IO A) => tau B (Sum (IO A) (IO B)) (inl t)) (fun (k : Option Text -> IO A) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inl (k r))) (fun (w : Text) (n : IO A) => writeOp B (Sum (IO A) (IO B)) w (inl n)) (fun (k : Json -> IO A) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inl (k j)))
+      (fun (p : Text) (k : Sum Text Json -> IO A) => listDirOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Json) => inl (k r))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO A) => findOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Json) => inl (k r)))
+      (fun (p : Text) (k : Sum Text Text -> IO A) => readFileOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Text) => inl (k r))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO A) => searchOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Json) => inl (k r)))
+      (fun (p : Text) (k : Sum Text Json -> IO A) => diskUsageOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Json) => inl (k r))) (out x))
+    (fun (y : IO B) => fold (fun (b : B) => ret B (Sum (IO A) (IO B)) b) (fun (t : IO B) => tau B (Sum (IO A) (IO B)) (inr t)) (fun (k : Option Text -> IO B) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inr (k r))) (fun (w : Text) (n : IO B) => writeOp B (Sum (IO A) (IO B)) w (inr n)) (fun (k : Json -> IO B) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inr (k j)))
+      (fun (p : Text) (k : Sum Text Json -> IO B) => listDirOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Json) => inr (k r))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO B) => findOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Json) => inr (k r)))
+      (fun (p : Text) (k : Sum Text Text -> IO B) => readFileOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Text) => inr (k r))) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO B) => searchOp B (Sum (IO A) (IO B)) p q (fun (r : Sum Text Json) => inr (k r)))
+      (fun (p : Text) (k : Sum Text Json -> IO B) => diskUsageOp B (Sum (IO A) (IO B)) p (fun (r : Sum Text Json) => inr (k r))) (out y)) s) (inl m)
 def ioMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> IO A -> IO B :=
   fun (A : Type 0) (B : Type 0) (f : A -> B) (m : IO A) => ioBind A B m (fun (a : A) => ioPure B (f a))
 def ioLoop : (S : Type 0) -> (R : Type 0) -> (S -> IO (Sum R S)) -> S -> IO R :=
   fun (S : Type 0) (R : Type 0) (body : S -> IO (Sum R S)) (s0 : S) => unfold (fun (m : IO (Sum R S)) => fold
     (fun (x : Sum R S) => either (fun (r : R) => ret R (IO (Sum R S)) r) (fun (s : S) => tau R (IO (Sum R S)) (body s)) x) (fun (t : IO (Sum R S)) => tau R (IO (Sum R S)) t) (fun (k : Option Text -> IO (Sum R S)) => readLineOp R (IO (Sum R S)) k)
-    (fun (w : Text) (n : IO (Sum R S)) => writeOp R (IO (Sum R S)) w n) (fun (k : Json -> IO (Sum R S)) => argsOp R (IO (Sum R S)) k) (out m)) (body s0)
+    (fun (w : Text) (n : IO (Sum R S)) => writeOp R (IO (Sum R S)) w n) (fun (k : Json -> IO (Sum R S)) => argsOp R (IO (Sum R S)) k)
+    (fun (p : Text) (k : Sum Text Json -> IO (Sum R S)) => listDirOp R (IO (Sum R S)) p k) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO (Sum R S)) => findOp R (IO (Sum R S)) p q k)
+    (fun (p : Text) (k : Sum Text Text -> IO (Sum R S)) => readFileOp R (IO (Sum R S)) p k) (fun (p : Text) (q : Text) (k : Sum Text Json -> IO (Sum R S)) => searchOp R (IO (Sum R S)) p q k)
+    (fun (p : Text) (k : Sum Text Json -> IO (Sum R S)) => diskUsageOp R (IO (Sum R S)) p k) (out m)) (body s0)
 
 -- Kan library (S2a, R6 (a)): transport, subst, J and the J rule as a path
 -- (JRefl, O11), all by transp.

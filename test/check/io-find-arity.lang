@@ -1,0 +1,3 @@
+-- find takes the root and the glob (S6 Q1 (a)): find with one argument is
+-- a function, thus it is refused where an IO value is needed.
+def wrong : IO (Sum Text Json) := find "d"

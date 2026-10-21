@@ -79,3 +79,6 @@ codata-bisim.lang PATH_END
 io-bind-carrier.lang TYPE_MISMATCH
 io-pure-type.lang TYPE_MISMATCH
 io-write-arg.lang TYPE_MISMATCH
+io-listdir-nat.lang TYPE_MISMATCH
+io-find-arity.lang TYPE_MISMATCH
+io-readfile-bind.lang TYPE_MISMATCH

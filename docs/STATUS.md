@@ -1149,3 +1149,64 @@ B, M7 and M8 in chunk C). The final gate is examples 32, parse refusals
 failures`, regressions 6, printer regressions 2, path regressions 206
 and terminal 12. The next slice is S6 (the filesystem operations 2 to
 10, docs/PLAN.md section 8).
+
+## S6a:  the filesystem read operations (2026-10-20)
+
+### Chunk A:  layer and check
+
+Chunk A adds the layer of the read operations 2, 4, 6, 8 and 10 (S6 Q1,
+Q2 and Q15 (a)). domain/domain.lang adds 5 constructors to IOF after
+`argsOp`, in the operation order:  `listDirOp`, `findOp`, `readFileOp`,
+`searchOp` and `diskUsageOp` (12 fields). It adds the defs `listDir`,
+`find`, `readFile`, `search` and `diskUsage` in the form of `args`, and
+the 5 arms in each leg of `ioBind` and in `ioLoop`. Each fold over IOF
+now takes 10 functions, then the target. examples/io.lang adds the 5 arms
+in `layers` and `result`. Each arm gives a fixed `inr` response:  `[]`
+for listDir, find and search, `{}` for diskUsage and `"text"` for
+readFile. The 5 trace defs bind the operation into a `write` of the
+response. driver.c does not change (chunk B).
+
+| Suite | Count |
+|---|---|
+| examples | 32 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 84 |
+| evals | 168 |
+| json | 32 |
+| json refusals | 4 |
+| gate | 0 failures |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 206 checked, 0 failed |
+| terminal | 12 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. The dash sweep is empty.
+
+Edit sites:
+
+- domain/domain.lang:  the IOF line, its comment, the IO monad comment,
+  the 5 defs after `args`, `ioBind` (2 legs) and `ioLoop`.
+- examples/io.lang:  the comment, `layers`, `result`, `showJson`,
+  `showText` and the 5 trace defs. test/eval/expect.txt:  5 rows.
+  test/json/io.json:  the 5 trace texts.
+- test/check:  io-listdir-nat.lang, io-find-arity.lang and
+  io-readfile-bind.lang, each TYPE_MISMATCH.
+- test/path-regressions.c:  the 6 guest folds over IOF and the budget of
+  `ioLoop of 1000 rounds` (D2, D3).
+- docs/PLAN.md:  `### USER ruling (S6)` and the section 8 rows S6a and
+  S6b.
+
+| Id | Deviation |
+|---|---|
+| D1 | The prompt names 10 field names. The 5 rows have 12 (2, 3, 2, 3, 2). The name probe tested all 22 names (5 defs, 5 constructors, 12 fields):  `langc check` accepts a def of each name, and the control `def args` gives REFUSE_NAME (rule R4). No name is `Bool` (RESERVED). |
+| D2 | Kickoff 1.1 counts 5 fold sites over IOF. test/path-regressions.c has 6 more guest folds over `out` (lines 123 and 1212 to 1220) with the 5 S5 arms. After the layer edit, the 3 accept cases failed at the fold arity, and the 3 refusal cases (1212, 1214, 1216) gave TYPE_MISMATCH for the fold arity, not for the universe. Each fold now has the 5 new arms. Each refusal again gives `expected a term of type Type 0, found a term of type Type 1` (`langc check` by hand). |
+| D3 | The path regression `ioLoop of 1000 rounds` (budget 300) stopped at EVAL_FUEL in the first round. A budget probe gives the minimum 330 (290 at S5:  8 fuel for each new constructor in the folds of one round). The budget is now 340 (the S5 margin of 10). The 4 constructors of S6b add about 32:  S6b chunk A sets the budget again. |
+| D4 | The USER gave no letter for S6. The PLAN block records each Q as the default (a) (prompt section 0). |
+
+| Id | Mutant | Killer |
+|---|---|---|
+| M1 | ioBind leg `inl`:  the searchOp arm gives `q p` | gate.sh `FAIL eval io searchTrace` (KILLED) |
+| M2 | `find`:  `findOp ... g r` | gate.sh `FAIL eval io findTrace` (KILLED) |
+
+Each mutant ran after `git add`, with `make -B check`, and was restored
+from the index. M3 to M7 run in chunk C.
