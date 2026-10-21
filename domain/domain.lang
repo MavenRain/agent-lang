@@ -64,6 +64,37 @@ family ColistF (A : Type 0) (X : Type 0) := cnil | ccons (chead : A) (ctail : X)
 cofamily Colist (A : Type 0) := ColistF A
 family MealyF (I : Type 0) (O : Type 0) (X : Type 0) := mealy (mealyOut : O) (mealyNext : I -> X)
 cofamily Mealy (I : Type 0) (O : Type 0) := MealyF I O
+-- IO (S5, Q1 and Q2 (a)): the cofamily of the layer IOF A, an interaction
+-- tree with a silent step. ret ends the run with a value, tau is a step
+-- with no operation, and each other constructor is one terminal operation
+-- with its continuation. S6 and S7 add a constructor for each operation.
+family IOF (A : Type 0) (X : Type 0) := ret (retValue : A) | tau (tauNext : X) | readLineOp (readLineNext : Option Text -> X) | writeOp (writeText : Text) (writeNext : X) | argsOp (argsNext : Json -> X)
+cofamily IO (A : Type 0) := IOF A
+-- The IO monad (Q4 and Q5 (a)), by guarded unfolds. ioPure gives ret at
+-- once. readLine, write and args give one operation layer, then ret with
+-- the response; the state none is the step before the operation. ioBind
+-- runs m, then f at the value of m: the state inl m copies each layer of
+-- m, ret a gives tau at the switch to f a, and the state inr n copies each
+-- layer of n. ioMap is ioBind and ioPure. ioLoop runs body at the state s:
+-- ret (inr s) gives tau at the next round, ret (inl r) ends the loop.
+def ioPure : (A : Type 0) -> A -> IO A :=
+  fun (A : Type 0) (a : A) => unfold (fun (u : Unit) => ret A Unit a) unit
+def readLine : IO (Option Text) :=
+  unfold (fun (s : Option (Option Text)) => option (readLineOp (Option Text) (Option (Option Text)) (fun (r : Option Text) => some r)) (fun (r : Option Text) => ret (Option Text) (Option (Option Text)) r) s) none
+def write : Text -> IO Unit :=
+  fun (t : Text) => unfold (fun (s : Option Unit) => option (writeOp Unit (Option Unit) t (some unit)) (fun (u : Unit) => ret Unit (Option Unit) u) s) none
+def args : IO Json :=
+  unfold (fun (s : Option Json) => option (argsOp Json (Option Json) (fun (j : Json) => some j)) (fun (j : Json) => ret Json (Option Json) j) s) none
+def ioBind : (A : Type 0) -> (B : Type 0) -> IO A -> (A -> IO B) -> IO B :=
+  fun (A : Type 0) (B : Type 0) (m : IO A) (f : A -> IO B) => unfold (fun (s : Sum (IO A) (IO B)) => either
+    (fun (x : IO A) => fold (fun (a : A) => tau B (Sum (IO A) (IO B)) (inr (f a))) (fun (t : IO A) => tau B (Sum (IO A) (IO B)) (inl t)) (fun (k : Option Text -> IO A) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inl (k r))) (fun (w : Text) (n : IO A) => writeOp B (Sum (IO A) (IO B)) w (inl n)) (fun (k : Json -> IO A) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inl (k j))) (out x))
+    (fun (y : IO B) => fold (fun (b : B) => ret B (Sum (IO A) (IO B)) b) (fun (t : IO B) => tau B (Sum (IO A) (IO B)) (inr t)) (fun (k : Option Text -> IO B) => readLineOp B (Sum (IO A) (IO B)) (fun (r : Option Text) => inr (k r))) (fun (w : Text) (n : IO B) => writeOp B (Sum (IO A) (IO B)) w (inr n)) (fun (k : Json -> IO B) => argsOp B (Sum (IO A) (IO B)) (fun (j : Json) => inr (k j))) (out y)) s) (inl m)
+def ioMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> IO A -> IO B :=
+  fun (A : Type 0) (B : Type 0) (f : A -> B) (m : IO A) => ioBind A B m (fun (a : A) => ioPure B (f a))
+def ioLoop : (S : Type 0) -> (R : Type 0) -> (S -> IO (Sum R S)) -> S -> IO R :=
+  fun (S : Type 0) (R : Type 0) (body : S -> IO (Sum R S)) (s0 : S) => unfold (fun (m : IO (Sum R S)) => fold
+    (fun (x : Sum R S) => either (fun (r : R) => ret R (IO (Sum R S)) r) (fun (s : S) => tau R (IO (Sum R S)) (body s)) x) (fun (t : IO (Sum R S)) => tau R (IO (Sum R S)) t) (fun (k : Option Text -> IO (Sum R S)) => readLineOp R (IO (Sum R S)) k)
+    (fun (w : Text) (n : IO (Sum R S)) => writeOp R (IO (Sum R S)) w n) (fun (k : Json -> IO (Sum R S)) => argsOp R (IO (Sum R S)) k) (out m)) (body s0)
 
 -- Kan library (S2a, R6 (a)): transport, subst, J and the J rule as a path
 -- (JRefl, O11), all by transp.

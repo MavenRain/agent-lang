@@ -76,3 +76,6 @@ codata-out.lang TYPE_MISMATCH
 codata-fold.lang CODATA_FOLD
 codata-elim.lang CODATA_FOLD
 codata-bisim.lang PATH_END
+io-bind-carrier.lang TYPE_MISMATCH
+io-pure-type.lang TYPE_MISMATCH
+io-write-arg.lang TYPE_MISMATCH

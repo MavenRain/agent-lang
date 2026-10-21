@@ -6,6 +6,7 @@
 #include "front/check.h"
 #include "front/big.h"
 #include "front/jsontext.h"
+#include "front/parser.h"
 
 #include <string.h>
 
@@ -507,6 +508,8 @@ static const Core *elab(Checker *c, const Term *t, const Value *hint, const Valu
 static const Core *check_lam(Checker *c, const Term *t, const Value *hint, const Value **type);
 static int annotation_ok(Checker *c, const Term *ann, const Value *dom);
 static int in_block(const Checker *c, uint32_t fam);
+static int is_cofamily(const Machine *m, const Value *v);
+static const char *name_owner(const Checker *c, const char *name);
 static const Core *apply_rest(Checker *c, const Core *k, const Value *ty, const Term *const *args, uint32_t argc, const Value *hint, const Value **type);
 
 static const Core *check(Checker *c, const Term *t, const Value *want) {
@@ -563,10 +566,110 @@ static int carrier_of(const Value *t, Carrier *carrier, const Value **elem) {
   return 1;
 }
 
-/* SHAPE (Option, List or Sum E) with the element ELEM. */
+/* 1 when T is IO A, the domain cofamily IO (S5 Q4 (a)). *ELEM is A. */
+static int io_of(const Machine *m, const Value *t, const Value **elem) {
+  if (!is_cofamily(m, t) || m->families[t->inst].param_count != 1u || strcmp(m->families[t->inst].name, "IO") != 0)
+    return 0;
+  *elem = t->args[0];
+  return 1;
+}
+
+/* IO ELEM, with IO the cofamily of the type IO. */
+static const Value *io_type(Checker *c, const Value *io, const Value *elem) {
+  const Value **args = arena_alloc(c->m->arena, sizeof *args);
+  if (args == NULL) {
+    (void)FAIL(c, "OOM", "out of memory");
+    return NULL;
+  }
+  args[0] = elem;
+  return val_op(c->m, VAL_OP, OP_FAMILY, io->inst, 0, args, 1u);
+}
+
+/* Recheck an inferred type argument through the ordinary type rules. Give
+   every scope level a fresh surface name, including shadowed binders. */
+static int io_small_type(Checker *c, const Value *v) {
+  const Scope *s;
+  const char **names = arena_alloc(c->m->arena, ((size_t)c->level + 1u) * sizeof *names);
+  Checker trial = *c;
+  const Scope **tail = &trial.scope;
+  TokenList tokens;
+  DeclList decls = {0};
+  char *source;
+  size_t cap = PRINT_MAX;
+  uint32_t fresh = 0;
+  const char prefix[] = "def _ioType : Type 0 := ";
+  if (names == NULL)
+    return FAIL(c, "OOM", "out of memory");
+  trial.scope = NULL;
+  for (s = c->scope; s != NULL; s = s->next) {
+    Scope *alias = arena_alloc(c->m->arena, sizeof *alias);
+    char *name = arena_alloc(c->m->arena, 32u);
+    if (alias == NULL || name == NULL)
+      return FAIL(c, "OOM", "out of memory");
+    do {
+      snprintf(name, 32u, "_ioType%u", fresh++);
+    } while (name_owner(c, name) != NULL || find_local(c, name) != NULL);
+    *alias = *s;
+    alias->name = name;
+    alias->next = NULL;
+    *tail = alias;
+    tail = &alias->next;
+    names[s->level] = name;
+  }
+  for (;;) {
+    int printed;
+    source = arena_alloc(c->m->arena, cap);
+    if (source == NULL)
+      return FAIL(c, "OOM", "out of memory");
+    memcpy(source, prefix, sizeof prefix - 1u);
+    printed = value_print_depth(c->m, names, c->level, v, source + sizeof prefix - 1u, cap - sizeof prefix + 1u, CHECK_DEPTH_LIMIT);
+    if (printed == 1)
+      break;
+    if (printed < 0)
+      return FAIL(c, "CHECK_DEPTH", "the IO type argument is nested deeper than %u levels", CHECK_DEPTH_LIMIT);
+    if (c->m->diag->set)
+      return 0;
+    if (cap > SIZE_MAX / 2u)
+      return FAIL(c, "OOM", "type is too large to recheck");
+    cap *= 2u;
+  }
+  return lex_source(c->m->arena, "IO type argument", source, strlen(source), &tokens, c->m->diag)
+    && parse_source(c->m->arena, "IO type argument", ORIGIN_PROGRAM, &tokens, &decls, c->m->diag)
+    && check(&trial, decls.items[0].body, val_univ(c->m, 0u)) != NULL;
+}
+
+/* Check the domain helper's type before building its core applications.
+   Type arguments and the specialized signature obey the same constraints
+   as an explicit application of the helper. */
+static const Core *io_def(Checker *c, const char *name, const Value *ta, const Value *tb, const Value *want) {
+  uint32_t d = find_def(c->m, name);
+  const Value *ty;
+  const Core *k;
+  if (d == NO_DEF)
+    return nul(FAIL(c, "NAME_UNKNOWN", "the domain declares IO but not the definition %s", name));
+  if (!io_small_type(c, ta) || (tb != NULL && !io_small_type(c, tb)))
+    return NULL;
+  ty = c->m->defs[d].type;
+  if (ty == NULL || ty->kind != VAL_PI || !expect(c, ty->dom, val_univ(c->m, 0u)))
+    return nul(FAIL(c, "TYPE_MISMATCH", "%s needs a type parameter in Type 0", name));
+  ty = closure_apply(c->m, ty, ta);
+  k = core_app(c, core_index(c, CORE_GLOBAL, d), quote_value(c->m, c->level, ta));
+  if (tb != NULL) {
+    if (ty == NULL || ty->kind != VAL_PI || !expect(c, ty->dom, val_univ(c->m, 0u)))
+      return nul(FAIL(c, "TYPE_MISMATCH", "%s needs a second type parameter in Type 0", name));
+    ty = closure_apply(c->m, ty, tb);
+    k = core_app(c, k, quote_value(c->m, c->level, tb));
+  }
+  return k != NULL && expect(c, ty, want) ? k : NULL;
+}
+
+/* SHAPE (Option, List, Sum E or IO) with the element ELEM. */
 static const Value *carried(Checker *c, const Value *shape, const Value *elem) {
+  const Value *a = NULL;
   if (shape == NULL)
     return NULL;
+  if (io_of(c->m, shape, &a))
+    return io_type(c, shape, elem);
   return val_is(shape, OP_SUM) ? tyop(c, OP_SUM, 2, shape->args[0], elem, NULL) : tyop(c, shape->op, 1, elem, NULL, NULL);
 }
 
@@ -613,7 +716,7 @@ static const Core *carried_arg(Call *k, const Term *arg, const Term *fn, const V
   const Core *x = try_infer(c, arg, type);
   if (x != NULL)
     return x;
-  if (!carrier_of(k->hint, &carrier, &elem))
+  if (!carrier_of(k->hint, &carrier, &elem) && !io_of(c->m, k->hint, &elem))
     return infer(c, arg, type);
   dom = lam_domain(c, fn);
   if (dom == NULL)
@@ -825,6 +928,12 @@ static const Core *rule_option(Call *k) {
 static const Core *rule_pure(Call *k) {
   Carrier carrier = CARRIER_OPTION;
   const Value *a = NULL;
+  const Core *f;
+  if (io_of(k->c->m, k->hint, &a)) {
+    f = io_def(k->c, "ioPure", a, NULL, val_arrow(k->c->m, a, k->hint));
+    k->type = k->hint;
+    return f == NULL ? NULL : core_app(k->c, f, check(k->c, k->args[0], a));
+  }
   if (!carrier_of(k->hint, &carrier, &a))
     return need_type(k, "Option A, List A or Sum E A");
   k->type = k->hint;
@@ -844,6 +953,12 @@ static const Core *rule_map(Call *k) {
   const Core *f;
   if (x == NULL)
     return NULL;
+  if (io_of(c->m, mt, &a)) {
+    f = fn_into(c, k->args[0], a, io_of(c->m, k->hint, &hint_elem) ? hint_elem : NULL, &b);
+    k->type = f == NULL ? NULL : io_type(c, mt, b);
+    return k->type == NULL ? NULL : core_app(c, core_app(c,
+      io_def(c, "ioMap", a, b, val_arrow(c->m, val_arrow(c->m, a, b), val_arrow(c->m, mt, k->type))), f), x);
+  }
   if (!carrier_of(mt, &carrier, &a))
     return not_carrier(k, mt);
   f = fn_into(c, k->args[0], a, carrier_of(k->hint, &hint_carrier, &hint_elem) ? hint_elem : NULL, &b);
@@ -864,6 +979,16 @@ static const Core *rule_bind(Call *k) {
   const Core *f;
   if (x == NULL)
     return NULL;
+  if (io_of(c->m, mt, &a)) {
+    f = fn_into(c, k->args[1], a, k->hint, &res);
+    if (f == NULL)
+      return NULL;
+    if (!io_of(c->m, res, &b))
+      return nul(FAIL(c, "TYPE_MISMATCH", "bind needs a function into the carrier of %s, found one into %s", show(c, mt), show(c, res)));
+    k->type = res;
+    return core_app(c, core_app(c,
+      io_def(c, "ioBind", a, b, val_arrow(c->m, mt, val_arrow(c->m, val_arrow(c->m, a, res), res))), x), f);
+  }
   if (!carrier_of(mt, &carrier, &a))
     return not_carrier(k, mt);
   f = fn_into(c, k->args[1], a, k->hint, &res);
@@ -1572,7 +1697,13 @@ static const Core *rule_counfold(Call *k) {
   Core *out;
   if (!is_cofamily(c->m, k->hint))
     return need_type(k, "C ps of a cofamily C");
-  seed = infer(c, k->args[1], &st);
+  /* When the seed does not infer (`inl m`), its type comes from the binder
+     of the step g, as in carried_arg (S5 chunk A). */
+  seed = try_infer(c, k->args[1], &st);
+  if (seed == NULL) {
+    st = lam_domain(c, k->args[0]);
+    seed = st == NULL ? infer(c, k->args[1], &st) : check(c, k->args[1], st);
+  }
   layer = seed == NULL ? NULL : layer_type(c, k->hint, st);
   g = layer == NULL ? NULL : check(c, k->args[0], val_arrow(c->m, st, layer));
   k->type = k->hint;

@@ -1,0 +1,2 @@
+-- write takes a Text (S5 Q3 (a)), also in the function of a bind at IO.
+def wrong : IO Unit := bind (ioPure Unit unit) (fun (u : Unit) => write 7)

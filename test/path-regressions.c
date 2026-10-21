@@ -66,11 +66,66 @@ static int json_domain_shape(const char *text_type, const char *number_type, con
   return ok;
 }
 
+/* Use a replacement domain, so the embedded IO helpers cannot hide a bad
+   signature or supply a helper that the replacement omitted. */
+static int io_domain_case(const char *label, const char *helper, const char *source, const char *code) {
+  Arena arena;
+  Machine m;
+  Diag diag;
+  DeclList decls = {0};
+  TokenList tokens;
+  const char *domain =
+    "family IOF (A : Type 0) (X : Type 0) := done (result : A)\n"
+    "cofamily IO (A : Type 0) := IOF A\n"
+    "def makeIO : (A : Type 0) -> A -> IO A := fun (A : Type 0) (a : A) => unfold (fun (s : A) => done A A s) a\n"
+    "def base : IO Nat := makeIO Nat 7\n";
+  int ok;
+  cases_run++;
+  arena_init(&arena, (size_t)128 << 20);
+  diag_init(&diag);
+  ok = lex_source(&arena, label, domain, strlen(domain), &tokens, &diag)
+    && parse_source(&arena, label, ORIGIN_DOMAIN, &tokens, &decls, &diag)
+    && lex_source(&arena, label, helper, strlen(helper), &tokens, &diag)
+    && parse_source(&arena, label, ORIGIN_DOMAIN, &tokens, &decls, &diag)
+    && lex_source(&arena, label, source, strlen(source), &tokens, &diag)
+    && parse_source(&arena, label, ORIGIN_PROGRAM, &tokens, &decls, &diag)
+    && check_program(&arena, &decls, &m, &diag);
+  ok = code == NULL ? ok : !ok && diag.set && strcmp(diag.code, code) == 0;
+  if (!ok) {
+    fprintf(stderr, "FAIL %s\n", label);
+    if (diag.set) diag_print(&diag, stderr);
+  }
+  arena_release(&arena);
+  return ok;
+}
+
 static int checked(Arena *arena, Machine *m, Diag *diag, const char *source) {
   DeclList decls;
   diag_init(diag);
   return front_load(arena, "path-regression", source, strlen(source), &decls, diag)
       && check_program(arena, &decls, m, diag);
+}
+
+static int io_deep_type(void) {
+  Arena arena;
+  Machine m;
+  Diag diag;
+  char source[4096] = "def T : Type 0 := ";
+  unsigned i;
+  int ok;
+  cases_run++;
+  for (i = 0; i < 240u; i++) strcat(source, "Unit -> ");
+  strcat(source,
+    "Nat\n"
+    "def good : T -> Nat := fun (x : T) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
+  arena_init(&arena, (size_t)128 << 20);
+  ok = checked(&arena, &m, &diag, source);
+  if (!ok) {
+    fprintf(stderr, "FAIL IO: a valid inferred type can exceed the diagnostic printer depth\n");
+    diag_print(&diag, stderr);
+  }
+  arena_release(&arena);
+  return ok;
 }
 
 static int big_fold_fuel(void) {
@@ -625,8 +680,8 @@ int main(void) {
     "def bwd : (k : Fin 6) -> C := fun (k : Fin 6) => finCase 6 k (pack 0 0) (pack 0 1) (pack 0 2) (pack 1 0) (pack 1 1) (pack 1 2)\n"
     "def sec : (k : Fin 6) -> Path (Fin 6) (fwd (bwd k)) k := fun (k : Fin 6) => refl\n"
     "def retC : (e : Fin 2) -> (x : Fin 3) -> Path C (bwd (fwd (pack e x))) (pack e x) := fun (e : Fin 2) => fun (x : Fin 3) => refl\n"
-    "def ret : (p : C) -> Path C (bwd (fwd p)) p := fun (p : C) => retC (witness p) (payload p)\n"
-    "def u : Path (Type 0) C (Fin 6) := ua C (Fin 6) (isoToEquiv C (Fin 6) fwd bwd sec ret)\n",
+    "def retAll : (p : C) -> Path C (bwd (fwd p)) p := fun (p : C) => retC (witness p) (payload p)\n"
+    "def u : Path (Type 0) C (Fin 6) := ua C (Fin 6) (isoToEquiv C (Fin 6) fwd bwd sec retAll)\n",
     "\"value\":{\"from\":\"Sigma (e : Fin 2) (Fin 3)\",\"to\":\"Fin 6\",\"transport\":[0,1,2,3,4,5]}");
   /* Empty literal carriers still select the table rules. */
   failed += !json_contains("empty Fin universe path prints an empty table",
@@ -1024,6 +1079,65 @@ int main(void) {
   failed += !domain_refuses("unfold: refl of g at 0 and g at 1 after eval", "",
     "def g : Nat -> StreamF Nat Nat := fun (n : Nat) => scons Nat Nat n (succ n)\n"
     "def bad : Path (Stream Nat) (unfold g (natSub 1 1)) (unfold g (natAdd 0 1)) := refl\n", "PATH_END");
+  /* S5 chunk A: the IO block, and pure, map and bind at IO. */
+  failed += !accepts("IO: the domain IO block gives a layer and a type",
+    "def l : IOF Unit Nat := writeOp Unit Nat \"a\" 0\n"
+    "def t : Type 0 := IO (Option Text)\n");
+  failed += !accepts("IO: pure at IO A is ioPure, one ret layer",
+    "def p : IO Nat := pure 7\n"
+    "def same : Path (IOF Nat (IO Nat)) (out p) (ret Nat (IO Nat) 7) := refl\n");
+  failed += !accepts("IO: map at IO A",
+    "def m : IO Nat := map (fun (u : Unit) => 7) (write \"a\")\n");
+  failed += !accepts("IO: bind at IO A",
+    "def b : IO Unit := bind readLine (fun (o : Option Text) => option (write \"none\") (fun (t : Text) => write t) o)\n");
+  failed += !accepts("IO: out (write \"a\") has the type IOF Unit (IO Unit)",
+    "def l : IOF Unit (IO Unit) := out (write \"a\")\n");
+  failed += !accepts("IO: out readLine has the type IOF (Option Text) (IO (Option Text))",
+    "def l : IOF (Option Text) (IO (Option Text)) := out readLine\n");
+  failed += !io_domain_case("IO: pure rejects a helper returning Nat",
+    "def ioPure : (A : Type 0) -> A -> Nat := fun (A : Type 0) (a : A) => 0\n",
+    "def bad : IO Nat := pure 7\n", "TYPE_MISMATCH");
+  failed += !io_domain_case("IO: map rejects a helper returning Nat",
+    "def ioMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> IO A -> Nat := fun (A : Type 0) (B : Type 0) (f : A -> B) (m : IO A) => 0\n",
+    "def bad : IO Nat := map (fun (n : Nat) => n) base\n", "TYPE_MISMATCH");
+  failed += !io_domain_case("IO: bind rejects a helper returning Nat",
+    "def ioBind : (A : Type 0) -> (B : Type 0) -> IO A -> (A -> IO B) -> Nat := fun (A : Type 0) (B : Type 0) (m : IO A) (f : A -> IO B) => 0\n",
+    "def bad : IO Nat := bind base (fun (n : Nat) => base)\n", "TYPE_MISMATCH");
+  failed += !io_domain_case("IO: pure rejects a term parameter in place of a type",
+    "def ioPure : Nat -> Nat -> IO Nat := fun (a : Nat) (b : Nat) => base\n",
+    "def bad : IO Nat := pure 7\n", "TYPE_MISMATCH");
+  failed += !io_domain_case("IO: map rejects a term parameter in place of its second type",
+    "def ioMap : (A : Type 0) -> Nat -> (A -> Nat) -> IO A -> IO Nat := fun (A : Type 0) (b : Nat) (f : A -> Nat) (m : IO A) => base\n",
+    "def bad : IO Nat := map (fun (n : Nat) => n) base\n", "TYPE_MISMATCH");
+  failed += !io_domain_case("IO: pure works with a compatible replacement helper",
+    "def ioPure : (A : Type 0) -> A -> IO A := fun (A : Type 0) (a : A) => makeIO A a\n",
+    "def good : IO Nat := pure 7\n", NULL);
+  failed += !io_domain_case("IO: map works with a compatible replacement helper",
+    "def ioMap : (A : Type 0) -> (B : Type 0) -> (A -> B) -> IO A -> IO B := fun (A : Type 0) (B : Type 0) (f : A -> B) (m : IO A) => makeIO B (f (fold (fun (a : A) => a) (out m)))\n",
+    "def good : IO Nat := map (fun (n : Nat) => n) base\n", NULL);
+  failed += !io_domain_case("IO: bind works with a compatible replacement helper",
+    "def ioBind : (A : Type 0) -> (B : Type 0) -> IO A -> (A -> IO B) -> IO B := fun (A : Type 0) (B : Type 0) (m : IO A) (f : A -> IO B) => f (fold (fun (a : A) => a) (out m))\n",
+    "def good : IO Nat := bind base (fun (n : Nat) => base)\n", NULL);
+  failed += !io_domain_case("IO: missing pure helper", "",
+    "def bad : IO Nat := pure 7\n", "NAME_UNKNOWN");
+  failed += !io_domain_case("IO: missing map helper", "",
+    "def bad : IO Nat := map (fun (n : Nat) => n) base\n", "NAME_UNKNOWN");
+  failed += !io_domain_case("IO: missing bind helper", "",
+    "def bad : IO Nat := bind base (fun (n : Nat) => base)\n", "NAME_UNKNOWN");
+  failed += !domain_refuses("IO: inferred map result must inhabit Type 0", "",
+    "def bad : Nat := fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (out (map (fun (n : Nat) => Nat) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
+  failed += !domain_refuses("IO: an inferred function type can also be too large", "",
+    "def bad : Nat := fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (out (map (fun (n : Nat) => fun (T : Type 0) => T) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
+  failed += !domain_refuses("IO: neutral map result keeps its universe", "",
+    "def bad : (T : Type 1) -> T -> Nat := fun (T : Type 1) (x : T) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n", "TYPE_MISMATCH");
+  failed += !accepts("IO: map infers a neutral small result type",
+    "def good : (F : Nat -> Type 0) -> (k : Nat) -> F k -> Nat := fun (F : Nat -> Type 0) (k : Nat) (x : F k) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
+  failed += !accepts("IO: a shadowed type binder keeps its original level",
+    "def good : (A : Type 0) -> A -> (A : Type 0) -> Nat := fun (A : Type 0) (x : A) (A : Type 0) => fold (fun t => 0) (fun t => 0) (fun k => 0) (fun w n => 0) (fun k => 0) (out (map (fun (n : Nat) => x) (ioPure Nat 0)))\n");
+  failed += !accepts("IO: map and bind propagate the IO hint to pure",
+    "def good : IO Nat := map (fun (n : Nat) => natAdd n 1) (pure 7)\n"
+    "def bound : IO Nat := bind (pure 7) (fun (n : Nat) => pure n)\n");
+  failed += !io_deep_type();
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

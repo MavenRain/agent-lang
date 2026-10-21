@@ -108,6 +108,36 @@ Q8: the kit `List` unfold stays;  the hint selects the rule.  Q9: the new
 codes CODATA_FORM, CODATA_POSITIVE and CODATA_FOLD.  Q10: Stream, Colist
 and Mealy in the domain.  The slice order of section 8 does not change.
 
+### USER ruling (S5)
+
+The USER gave this ruling on 2026-10-20, after the S5 kickoff (the kickoff
+record, outside the repo, section 2):
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a Q10=a Q11=a Q12=a
+
+Each letter is the proposal (a) of the kickoff.  Q1: `IO A` is a domain
+cofamily, the final coalgebra of the layer `IOF A` (O3 (a));  no new
+former.  Q2: the layer has `ret`, `tau` and one constructor for each
+operation (`readLineOp`, `writeOp`, `argsOp`);  S6 and S7 add the other
+operations.  Q3: `readLine : IO (Option Text)` gives the line without its
+newline and `none` at the end of the input;  `write : Text -> IO Unit`
+writes the bytes and flushes, and a write error stops the run (IO_WRITE);
+`args : IO Json` gives an array of the arguments after the program name.
+Q4: `pure`, `map` and `bind` at `IO` become the domain defs `ioPure`,
+`ioMap` and `ioBind`, guarded unfolds.  Q5: the domain def `ioLoop` makes
+a loop, with one `tau` for each round;  R3 stays.  Q6: the driver applies
+`out`, runs each operation and gives the response to the continuation;
+the fuel budget starts again at each operation;  the arena limit stays
+(open item O22).  Q7: `langc build` writes an executable with libtcc
+(TCC_OUTPUT_EXE).  Q8: make embeds the runtime units as preprocessed text;
+the executable holds the program text and checks it again at start.
+Q9: the kit `build` verb becomes `langc json` (O20 (a));  `langc build
+PROG -o OUT` is the console build, with the codes BUILD_MAIN,
+BUILD_MAIN_TYPE and BUILD_TCC.  Q10: a C test runner test/terminal.c
+builds and runs each test program in build/term/.  Q11: the JSON rule of
+S4 Q7 applies to `IO`.  Q12: the slice order of section 8 does not
+change.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |

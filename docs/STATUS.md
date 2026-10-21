@@ -802,3 +802,102 @@ Deviations:
   arm of the conversion: the conversion has no `unfold` arm of its own. M7
   adds `&& t->kind != CORE_PI`, which is false in the loop. M12 gives
   `put_text(o, "null")`.
+
+## S5:  IO and the console build (2026-10-20)
+
+### Chunk A:  domain and check
+
+Chunk A adds the IO block to the domain and the IO case of the kit monad
+rules. domain/domain.lang declares the layer family IOF (`ret`, `tau`,
+`readLineOp`, `writeOp`, `argsOp`) and the cofamily IO after the Mealy
+block (Q1 and Q2 (a)), and the defs `ioPure`, `readLine`, `write`, `args`,
+`ioBind`, `ioMap` and `ioLoop` (Q3 to Q5 (a)). Each def is a guarded
+unfold. `readLine`, `write` and `args` give one operation layer, then
+`ret`; the seed `none` is the step before the operation. `ioBind` has the
+state `Sum (IO A) (IO B)` and gives one `tau` at the switch to `f a`.
+`ioLoop` has the state `IO (Sum R S)` and gives one `tau` for each round.
+In check.c, `pure` at an `IO A` hint, and `map` and `bind` at an `IO A`
+carried type, elaborate to the application of `ioPure`, `ioMap` or
+`ioBind` (Q4 (a)). `bind` at IO with a function into another carrier is
+TYPE_MISMATCH. Chunk A adds no Op, no Carrier and no switch arm.
+
+| Suite | Count |
+|---|---|
+| examples | 31 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 81 |
+| evals | 151 |
+| json builds | 31 |
+| build refusals | 4 |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 179 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. The dash sweep is empty.
+
+Edit sites:
+
+- domain/domain.lang: the IO block (31 lines) after `cofamily Mealy`.
+- src/front/check.c: a forward declaration of `is_cofamily`; `io_of`,
+  `io_type` and `io_def` before `carried`; `carried` and `carried_arg`
+  accept an IO shape; the IO case at the start of `rule_pure`, and after
+  `carried_arg` in `rule_map` and `rule_bind`; the seed of
+  `rule_counfold` (D1).
+- test/check: io-bind-carrier, io-pure-type and io-write-arg (each
+  TYPE_MISMATCH), 3 lines in expect.txt.
+- test/path-regressions.c: cases 174 to 179 (an IOF layer and an IO type,
+  `pure` with refl of its layer, `map`, `bind`, the type of
+  `out (write "a")`, the type of `out readLine`); D2.
+
+Deviations:
+
+- D1: `rule_counfold` (S4) infers the seed with `try_infer`. When the seed
+  does not infer (`inl m`, `none`), its type comes from the binder of the
+  step, as in `carried_arg`. The language has no annotation term, thus the
+  `ioBind` seed `inl m` and the seed `none` of `readLine`, `write` and
+  `args` need this fallback. Each S4 seed infers, thus no S4 result
+  changes.
+- D2: rule R4 makes the constructor name `ret` a core name. The S6b path
+  regression `ua table at a Sigma carrier` declared a def `ret`;  it is now
+  `retAll`. The name test (`is_reserved`, `name_free`, the builtin table)
+  found no clash;  a search of all guest text found this one def.
+- D3: the parameter order of `ioLoop` is S, then R
+  (`ioLoop S R body s`), the order of its arrow type in the kickoff.
+- D4: each rule finds its def by name at each use (`find_def`), as
+  `equiv_sigma` finds `Equiv`. The rule finds the cofamily IO by the name
+  of the family of the type. A domain with IO and without the def gives
+  NAME_UNKNOWN.
+
+Probe (before the domain edit, a langc in $TMPDIR with the IO block, a
+trace of the layers):  `write "a"` gives a, ret;  `bind` of two writes
+gives a, tau, b, ret;  `map` gives a, tau, ret;  `bind readLine` gives
+read, tau, the line, ret;  `bind args` gives args, tau, the write, ret;
+`ioLoop` of 2 rounds gives x, tau, tau, x, tau, tau, ret.
+
+Mutants: chunk A has no mutant. M8 (`rule_bind` elaborates to `ioMap`)
+waits for its killer examples/io.lang in chunk C.
+
+#### Chunk A staged review (2026-10-20)
+
+Reviewed all nine staged files. No CI or test weakening was found. Two
+correctness findings were fixed:
+
+- HIGH: `io_def` constructed unchecked helper applications. A replacement
+  domain could declare `ioPure`, `ioMap` or `ioBind` with a `Nat` result,
+  yet the corresponding surface expression checked as `IO Nat`. Helpers
+  now require type parameters in `Type 0` and the expected specialized
+  signature before their core applications are built.
+- MEDIUM: an inferred IO mapper could return a type, accepting an invalid
+  `IO (Type 0)` inside `out` and `fold`. Inferred helper type arguments
+  are now rechecked at `Type 0` through the ordinary checker. Fresh scope
+  names preserve neutral types and shadowed binders. Source printing uses
+  the checker depth budget and distinguishes depth cuts from full buffers.
+
+The review adds 18 C path regressions: incompatible and missing helpers,
+compatible replacement helpers, closed and neutral universe violations,
+neutral small types, shadowed type binders, nested `pure` inference and a
+240-arrow inferred type. Eight new negative cases fail with the original
+staged checker. `make check` passes, with 197 path regressions and no
+failures. The same 197 cases pass with AddressSanitizer and
+UndefinedBehaviorSanitizer. Validation ran serially in one isolated index
+snapshot. Both findings are fixed; no blockers remain.

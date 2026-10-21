@@ -412,6 +412,9 @@ const Core *quote_value(Machine *m, uint32_t level, const Value *v);
 /* Writes V in the surface syntax. NAMES gives the names of the levels below
    NAME_COUNT. Returns 1 for a complete rendering, 0 on truncation or error. */
 int value_print(Machine *m, const char *const *names, uint32_t name_count, const Value *v, char *buf, size_t cap);
+/* Source rechecking can use the checker's depth budget. Returns -1 for a
+   depth limit, 0 for a full buffer or a diagnostic, and 1 for full source. */
+int value_print_depth(Machine *m, const char *const *names, uint32_t name_count, const Value *v, char *buf, size_t cap, unsigned depth_limit);
 const char *op_name(const Machine *m, Op op, uint32_t inst, uint32_t field);
 
 #endif

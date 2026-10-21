@@ -7,7 +7,7 @@
 #include <string.h>
 
 #define PRINT_DEPTH_MAX 200u
-#define PRINT_NAMES_MAX PRINT_DEPTH_MAX
+#define PRINT_NAMES_MAX EVAL_DEPTH_LIMIT
 #define VARIES 0xffu
 
 static const char *const OP_NAMES[] = {
@@ -3959,6 +3959,8 @@ typedef struct {
   const char *extra[PRINT_NAMES_MAX];
   uint32_t extra_count;
   unsigned depth;
+  unsigned depth_limit;
+  int depth_cut;
 } Printer;
 
 static void put(Printer *p, const char *s) {
@@ -4350,9 +4352,10 @@ static void print_value(Printer *p, const Value *v, int atom) {
   char num[32];
   uint32_t open = 0;
   uint32_t i;
-  if (p->depth >= PRINT_DEPTH_MAX) {
+  if (p->depth >= p->depth_limit) {
     put(p, "...");
     p->full = 1;
+    p->depth_cut = 1;
     return;
   }
   p->depth++;
@@ -4400,7 +4403,7 @@ static void print_value(Printer *p, const Value *v, int atom) {
   p->depth--;
 }
 
-int value_print(Machine *m, const char *const *names, uint32_t name_count, const Value *v, char *buf, size_t cap) {
+int value_print_depth(Machine *m, const char *const *names, uint32_t name_count, const Value *v, char *buf, size_t cap, unsigned depth_limit) {
   Printer p;
   if (cap == 0)
     return 0;
@@ -4413,6 +4416,11 @@ int value_print(Machine *m, const char *const *names, uint32_t name_count, const
   p.cap = cap;
   p.names = names;
   p.name_count = name_count;
+  p.depth_limit = depth_limit < PRINT_NAMES_MAX ? depth_limit : PRINT_NAMES_MAX;
   print_value(&p, v, 0);
-  return !p.full && !m->diag->set;
+  return p.depth_cut ? -1 : !p.full && !m->diag->set;
+}
+
+int value_print(Machine *m, const char *const *names, uint32_t name_count, const Value *v, char *buf, size_t cap) {
+  return value_print_depth(m, names, name_count, v, buf, cap, PRINT_DEPTH_MAX) == 1;
 }

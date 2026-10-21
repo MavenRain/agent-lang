@@ -1,0 +1,2 @@
+-- pure at the expected type IO Nat needs a Nat (S5 Q4 (a)).
+def wrong : IO Nat := pure "a"

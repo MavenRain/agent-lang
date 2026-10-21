@@ -1,0 +1,3 @@
+-- bind at IO A needs a function into IO B (S5 Q4 (a)): a function into
+-- Option Nat is refused.
+def wrong : Option Nat := bind (ioPure Nat 1) (fun (n : Nat) => some n)
