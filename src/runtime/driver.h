@@ -5,14 +5,33 @@
 
 #include "front/core.h"
 
+/* The trash form (S6 Q6 (a)): HOME/.Trash on macOS, the XDG trash
+   (files/ and info/) on another system. */
+typedef enum { TRASH_MACOS, TRASH_XDG } TrashForm;
+
+/* The environment of a run (S6 Q7 (a)). The fuel is BUDGET at the start
+   and again after each terminal operation. readLine reads IN, write
+   writes OUT, and args gives the arguments after ARGV[0]. TRASH_ROOT is
+   the trash directory (NULL: no HOME), in the form TRASH_FORM. FORCE_EXDEV
+   is the test field of Q4: when it is not 0, move takes each rename as
+   EXDEV. The console program gives 0. */
+typedef struct {
+  uint64_t budget;
+  FILE *in;
+  FILE *out;
+  int argc;
+  char *const *argv;
+  const char *trash_root;
+  TrashForm trash_form;
+  int force_exdev;
+} IoEnv;
+
 /* Finds the cofamily IO of one parameter. Returns 1, or 0. */
 int io_family(const Machine *m, uint32_t *out);
 /* Finds the definition main. Returns 1, or 0 after a BUILD_MAIN
    diagnostic. */
 int io_main(Machine *m, uint32_t *index);
-/* Runs the IO value V. Each out of V spends 1 fuel. The fuel is BUDGET at
-   the start and again after each terminal operation. readLine reads IN,
-   write writes OUT, and args gives the arguments after ARGV[0]. Returns 0
-   at ret, or 1 after a diagnostic. */
-int io_run(Machine *m, const Value *v, uint64_t budget, FILE *in, FILE *out, int argc, char *const *argv);
+/* Runs the IO value V in ENV. Each out of V spends 1 fuel. Returns 0 at
+   ret, or 1 after a diagnostic. */
+int io_run(Machine *m, const Value *v, const IoEnv *env);
 #endif

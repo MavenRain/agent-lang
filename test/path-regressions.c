@@ -1,7 +1,13 @@
 #define _POSIX_C_SOURCE 200809L
+#include <errno.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "front/front.h"
 #include "front/check.h"
@@ -131,6 +137,35 @@ static int io_deep_type(void) {
   return ok;
 }
 
+/* Runs SOURCE in the IO driver: gives the status (-1 when the run did not
+   start), *BYTES (malloc'd, *LEN bytes and a NUL after them; NULL when
+   READ_ONLY) and *DIAG. */
+static int io_driver_exec(const char *source, const char *input, int argc, char *const *argv, uint64_t budget,
+                          int read_only, Diag *diag, char **bytes, size_t *len) {
+  Arena arena;
+  Machine m;
+  uint32_t index = 0;
+  int got = -1;
+  FILE *in;
+  FILE *stream;
+  *bytes = NULL;
+  *len = 0;
+  diag_init(diag);
+  arena_init(&arena, (size_t)128 << 20);
+  /* fmemopen of size 0 can fail, thus an empty input is /dev/null. */
+  in = input[0] ? fmemopen((void *)input, strlen(input), "r") : fopen("/dev/null", "r");
+  stream = read_only ? fopen("/dev/null", "r") : open_memstream(bytes, len);
+  if (in && stream && checked(&arena, &m, diag, source) && io_main(&m, &index)) {
+    /* The trash root of the S6b rows is under build/fs/pr/ (S6 Q7 (a)). */
+    IoEnv env = {budget, in, stream, argc, argv, "build/fs/pr/trash", TRASH_MACOS, 0};
+    got = io_run(&m, def_value(&m, index), &env);
+  }
+  if (in) fclose(in);
+  if (stream) fclose(stream);
+  arena_release(&arena);
+  return got;
+}
+
 /* Runs main of SOURCE with the IO driver (S5 chunk B). INPUT is the
    standard input. READ_ONLY gives an output stream that refuses each
    write: /dev/null for reading (macOS fmemopen in mode "r" takes
@@ -138,33 +173,17 @@ static int io_deep_type(void) {
    (NULL: no diagnostic). */
 static int io_driver_run(const char *label, const char *source, const char *input, int argc, char *const *argv,
                          uint64_t budget, int read_only, const char *out, int status, const char *code) {
-  Arena arena;
-  Machine m;
   Diag diag;
-  uint32_t index = 0;
   char *bytes = NULL;
   size_t len = 0;
-  int got = -1;
-  int ok;
-  FILE *in;
-  FILE *stream;
-  diag_init(&diag);
-  arena_init(&arena, (size_t)128 << 20);
-  /* fmemopen of size 0 can fail, thus an empty input is /dev/null. */
-  in = input[0] ? fmemopen((void *)input, strlen(input), "r") : fopen("/dev/null", "r");
-  stream = read_only ? fopen("/dev/null", "r") : open_memstream(&bytes, &len);
-  if (in && stream && checked(&arena, &m, &diag, source) && io_main(&m, &index))
-    got = io_run(&m, def_value(&m, index), budget, in, stream, argc, argv);
-  if (in) fclose(in);
-  if (stream) fclose(stream);
-  ok = got == status && (code ? diag.set && strcmp(diag.code, code) == 0 : !diag.set)
+  int got = io_driver_exec(source, input, argc, argv, budget, read_only, &diag, &bytes, &len);
+  int ok = got == status && (code ? diag.set && strcmp(diag.code, code) == 0 : !diag.set)
     && len == strlen(out) && (len == 0 || memcmp(bytes, out, len) == 0);
   if (!ok) {
     fprintf(stderr, "FAIL IO driver: %s: status %d, %zu bytes \"%.*s\"\n", label, got, len, (int)len, bytes ? bytes : "");
     diag_print(&diag, stderr);
   }
   free(bytes);
-  arena_release(&arena);
   return ok;
 }
 
@@ -210,6 +229,257 @@ static int io_loop_rounds(void) {
   input[0] = '\0';
   for (i = 0; i < 1000u; i++) strcat(input, "ab\n");
   return io_driver_case("ioLoop of 1000 rounds", io_echo_loop, input, 0, NULL, 340, input, 0, NULL);
+}
+
+/* The filesystem rows (S6a chunk B). The runner runs from the repo root,
+   thus each guest path is relative, under build/fs/pr/ (S6 Q13 (a)). */
+extern char **environ;
+
+typedef enum { FS_DIR, FS_FILE, FS_LINK, FS_FIFO } FsForm;
+
+/* An item of a tree (kickoff 1.5): PATH under the root, the FORM, the
+   LENGTH bytes at BYTES of a file (a file can hold a NUL byte), the
+   TARGET of a link, and the MODE (0 keeps the default). */
+typedef struct {
+  const char *path;
+  FsForm form;
+  const char *bytes;
+  size_t length;
+  const char *target;
+  mode_t mode;
+} FsItem;
+
+/* A fresh build/fs/pr/: /bin/rm -rf (as terminal.c), then mkdir. The
+   umask is 022 for each fs row (kickoff section 5: the copy mode row). */
+static int fs_reset(void) {
+  static char *const argv[] = {"/bin/rm", "-rf", "build/fs/pr", NULL};
+  pid_t pid;
+  int status = 0;
+  int ok;
+  umask(022);
+  ok = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) == 0 && waitpid(pid, &status, 0) == pid
+    && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  ok = ok && (mkdir("build/fs", 0777) == 0 || errno == EEXIST) && mkdir("build/fs/pr", 0777) == 0;
+  if (!ok) fprintf(stderr, "FAIL fs reset: build/fs/pr\n");
+  return ok;
+}
+
+/* Makes ROOT/PATH of ITEM. */
+static int fs_item(const char *root, const FsItem *item) {
+  char path[512];
+  FILE *file = NULL;
+  int ok = snprintf(path, sizeof path, "%s/%s", root, item->path) < (int)sizeof path;
+  switch (item->form) {
+  case FS_DIR:
+    ok = ok && mkdir(path, 0777) == 0;
+    break;
+  case FS_FILE:
+    file = ok ? fopen(path, "wb") : NULL;
+    ok = file != NULL && fwrite(item->bytes, 1, item->length, file) == item->length;
+    ok = file != NULL && fclose(file) == 0 && ok;
+    break;
+  case FS_LINK:
+    ok = ok && symlink(item->target, path) == 0;
+    break;
+  case FS_FIFO:
+    ok = ok && mkfifo(path, 0666) == 0;
+    break;
+  }
+  ok = ok && (item->mode == 0 || chmod(path, item->mode) == 0);
+  if (!ok) fprintf(stderr, "FAIL fs tree: %s\n", path);
+  return ok;
+}
+
+/* Makes the directory ROOT, then each item in the table order (a
+   directory before its items). */
+static int fs_tree(const char *root, const FsItem *items, size_t count) {
+  int ok = mkdir(root, 0777) == 0;
+  size_t i;
+  if (!ok) fprintf(stderr, "FAIL fs tree: %s\n", root);
+  for (i = 0; ok && i < count; i++) ok = fs_item(root, &items[i]);
+  return ok;
+}
+
+/* The tree of the read rows, made once. */
+#define FS_R "build/fs/pr/read"
+/* The LENGTH bytes of a literal file text. */
+#define FS_BYTES(text) text, sizeof text - 1u
+/* late.dat: 8200 bytes x, a \n, then z NUL apple \n: the NUL byte is
+   after the 8 KiB test of search. */
+#define FS_LATE_X 8200u
+static char fs_late[FS_LATE_X + 9u];
+
+static const FsItem fs_read_items[] = {
+  {"ls", FS_DIR, NULL, 0, NULL, 0},
+  {"ls/.dot", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"ls/Zeta", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"ls/alpha", FS_DIR, NULL, 0, NULL, 0},
+  {"ls/beta", FS_LINK, NULL, 0, "Zeta", 0},
+  {"ls/pipe", FS_FIFO, NULL, 0, NULL, 0},
+  {"empty", FS_DIR, NULL, 0, NULL, 0},
+  {"walk", FS_DIR, NULL, 0, NULL, 0},
+  {"walk/a.c", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"walk/.b.c", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"walk/sub-x.c", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"walk/sub", FS_DIR, NULL, 0, NULL, 0},
+  {"walk/sub/c.c", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"walk/sub/d.h", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"walk/sub/deep", FS_DIR, NULL, 0, NULL, 0},
+  {"walk/sub/deep/e.c", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"walk/link", FS_LINK, NULL, 0, "sub", 0},
+  {"walk-link", FS_LINK, NULL, 0, "walk/sub", 0},
+  {"files", FS_DIR, NULL, 0, NULL, 0},
+  {"files/nul.bin", FS_FILE, FS_BYTES("a\0b\nc"), NULL, 0},
+  {"files/empty.txt", FS_FILE, FS_BYTES(""), NULL, 0},
+  {"text", FS_DIR, NULL, 0, NULL, 0},
+  {"text/order", FS_DIR, NULL, 0, NULL, 0},
+  {"text/order/a.txt", FS_FILE, FS_BYTES("apple\n"), NULL, 0},
+  {"text/order/b.txt", FS_FILE, FS_BYTES("one apple\ntwo\napple pie\n"), NULL, 0},
+  {"text/order/sub", FS_DIR, NULL, 0, NULL, 0},
+  {"text/order/sub/c.txt", FS_FILE, FS_BYTES("x\nred apple\r\n"), NULL, 0},
+  {"text/order/l.txt", FS_LINK, NULL, 0, "a.txt", 0},
+  {"text-link", FS_LINK, NULL, 0, "text/order", 0},
+  {"dangling-link", FS_LINK, NULL, 0, "none", 0},
+  {"text/bin", FS_DIR, NULL, 0, NULL, 0},
+  {"text/bin/bin.dat", FS_FILE, FS_BYTES("apple\0"), NULL, 0},
+  {"text/bin/ok.txt", FS_FILE, FS_BYTES("apple"), NULL, 0},
+  {"text/late", FS_DIR, NULL, 0, NULL, 0},
+  {"text/late/late.dat", FS_FILE, fs_late, sizeof fs_late, NULL, 0},
+};
+
+/* The guest text of an fs row (kickoff row S6a B) into SOURCE: CALL, then
+   "inl " and the text of an inl, or the jsonRender of the inr value (a
+   Text value as a jstr when TEXT). Gives 0 when SOURCE is too small. */
+static int fs_source(char *source, size_t cap, const char *call, int text) {
+  const char *type = text ? "Text" : "Json";
+  int len = snprintf(source, cap,
+    "def main : IO Unit := bind (%s) (fun (r : Sum Text %s) => either (fun (e : Text) => write (textAppend \"inl \" e))"
+    " (fun (j : %s) => write (jsonRender %s)) r)\n", call, type, type, text ? "(jstr j)" : "j");
+  return len >= 0 && (size_t)len < cap;
+}
+
+static int fs_case(const char *label, const char *call, int text, const char *out) {
+  char source[1024];
+  if (!fs_source(source, sizeof source, call, text)) {
+    cases_run++;
+    fprintf(stderr, "FAIL fs row: %s: the source is too long\n", label);
+    return 0;
+  }
+  return io_driver_case(label, source, "", 0, NULL, EVAL_FUEL_STEPS, out, 0, NULL);
+}
+
+/* 1 when A and B differ by at most 64 MiB (the free bytes drift between
+   two calls, kickoff section 5). */
+static int fs_near(uint64_t a, uint64_t b) {
+  return (a > b ? a - b : b - a) <= (uint64_t)64 << 20;
+}
+
+/* diskUsage of PATH: the PLAN key order, total equal to the runner's own
+   statvfs, and free and available within 64 MiB of it. */
+static int fs_disk_usage(const char *label, const char *path) {
+  char call[256];
+  char source[1024];
+  Diag diag;
+  struct statvfs s;
+  char *bytes = NULL;
+  size_t len = 0;
+  unsigned long long total = 0;
+  unsigned long long spare = 0;
+  unsigned long long avail = 0;
+  int used = -1;
+  int got = -1;
+  int ok;
+  cases_run++;
+  diag_init(&diag);
+  ok = snprintf(call, sizeof call, "diskUsage \"%s\"", path) < (int)sizeof call && fs_source(source, sizeof source, call, 0);
+  got = ok ? io_driver_exec(source, "", 0, NULL, EVAL_FUEL_STEPS, 0, &diag, &bytes, &len) : -1;
+  ok = got == 0 && !diag.set && bytes != NULL && statvfs(path, &s) == 0
+    && sscanf(bytes, "{\"total\":%llu,\"free\":%llu,\"available\":%llu}%n", &total, &spare, &avail, &used) == 3
+    && used >= 0 && (size_t)used == len && total == (uint64_t)s.f_blocks * (uint64_t)s.f_frsize
+    && fs_near(spare, (uint64_t)s.f_bfree * (uint64_t)s.f_frsize)
+    && fs_near(avail, (uint64_t)s.f_bavail * (uint64_t)s.f_frsize);
+  if (!ok) {
+    fprintf(stderr, "FAIL IO driver: %s: status %d, %zu bytes \"%.*s\"\n", label, got, len, (int)len, bytes ? bytes : "");
+    diag_print(&diag, stderr);
+  }
+  free(bytes);
+  return ok;
+}
+
+/* 3 operations, then write: the fuel is the budget again after each
+   operation, thus a budget for one segment holds the run. */
+static const char fs_three_ops[] =
+  "def main : IO Unit := bind (diskUsage \"" FS_R "\") (fun (a : Sum Text Json) => bind (readFile \"" FS_R "/files/empty.txt\")"
+  " (fun (b : Sum Text Text) => bind (listDir \"" FS_R "/empty\") (fun (c : Sum Text Json) => write \"ok\")))\n";
+/* The budget of the 3 operation row: the probe minimum + 10 (STATUS D-row). */
+#define FS_SEGMENT_BUDGET 281
+
+/* The 33 read rows over one tree (kickoff row S6a B). Gives the count of
+   the failed rows (and 1 more when the tree fails). */
+static int fs_read_rows(void) {
+  int failed = 0;
+  memset(fs_late, 'x', FS_LATE_X);
+  memcpy(fs_late + FS_LATE_X, "\nz\0apple\n", 9u);
+  failed += !(fs_reset() && fs_tree(FS_R, fs_read_items, sizeof fs_read_items / sizeof fs_read_items[0]));
+  failed += !fs_case("listDir sorted", "listDir \"" FS_R "/ls\"", 0,
+    "[{\"name\":\".dot\",\"kind\":\"file\"},{\"name\":\"Zeta\",\"kind\":\"file\"},{\"name\":\"alpha\",\"kind\":\"dir\"},"
+    "{\"name\":\"beta\",\"kind\":\"link\"},{\"name\":\"pipe\",\"kind\":\"other\"}]");
+  failed += !fs_case("listDir empty directory", "listDir \"" FS_R "/empty\"", 0, "[]");
+  failed += !fs_case("listDir missing path", "listDir \"" FS_R "/none\"", 0,
+    "inl listDir: " FS_R "/none: No such file or directory");
+  failed += !fs_case("listDir file", "listDir \"" FS_R "/ls/Zeta\"", 0, "inl listDir: " FS_R "/ls/Zeta: Not a directory");
+  failed += !fs_case("listDir root link not walked", "listDir \"" FS_R "/walk-link\"", 0,
+    "inl listDir: " FS_R "/walk-link: Not a directory");
+  failed += !fs_case("listDir NUL byte", "listDir \"" FS_R "/ls\\x00\"", 0, "inl listDir: the path holds a NUL byte");
+  failed += !fs_case("find nested sorted", "find \"" FS_R "/walk/sub\" \"*\"", 0,
+    "[\"" FS_R "/walk/sub/c.c\",\"" FS_R "/walk/sub/d.h\",\"" FS_R "/walk/sub/deep\",\"" FS_R "/walk/sub/deep/e.c\"]");
+  failed += !fs_case("find link not walked", "find \"" FS_R "/walk\" \"c.c\"", 0, "[\"" FS_R "/walk/sub/c.c\"]");
+  failed += !fs_case("find root link not walked", "find \"" FS_R "/walk-link\" \"*\"", 0,
+    "inl find: " FS_R "/walk-link: Not a directory");
+  failed += !fs_case("find root link slash not walked", "find \"" FS_R "/walk-link/\" \"*\"", 0,
+    "inl find: " FS_R "/walk-link/: Not a directory");
+  failed += !fs_case("find dot name", "find \"" FS_R "/walk\" \"*.c\"", 0,
+    "[\"" FS_R "/walk/.b.c\",\"" FS_R "/walk/a.c\",\"" FS_R "/walk/sub-x.c\",\"" FS_R "/walk/sub/c.c\",\""
+    FS_R "/walk/sub/deep/e.c\"]");
+  failed += !fs_case("find no match", "find \"" FS_R "/walk\" \"*.zip\"", 0, "[]");
+  failed += !fs_case("find missing root", "find \"" FS_R "/none\" \"*\"", 0,
+    "inl find: " FS_R "/none: No such file or directory");
+  failed += !fs_case("readFile NUL", "readFile \"" FS_R "/files/nul.bin\"", 1, "\"a\\u0000b\\u000ac\"");
+  failed += !fs_case("readFile empty file", "readFile \"" FS_R "/files/empty.txt\"", 1, "\"\"");
+  failed += !fs_case("readFile follows file link", "readFile \"" FS_R "/text/order/l.txt\"", 1, "\"apple\\u000a\"");
+  failed += !fs_case("readFile directory", "readFile \"" FS_R "/files\"", 1, "inl readFile: " FS_R "/files: Is a directory");
+  failed += !fs_case("readFile missing file", "readFile \"" FS_R "/files/none\"", 1,
+    "inl readFile: " FS_R "/files/none: No such file or directory");
+  failed += !fs_case("search order", "search \"" FS_R "/text/order\" \"apple\"", 0,
+    "[{\"path\":\"" FS_R "/text/order/a.txt\",\"line\":1,\"text\":\"apple\"},"
+    "{\"path\":\"" FS_R "/text/order/b.txt\",\"line\":1,\"text\":\"one apple\"},"
+    "{\"path\":\"" FS_R "/text/order/b.txt\",\"line\":3,\"text\":\"apple pie\"},"
+    "{\"path\":\"" FS_R "/text/order/sub/c.txt\",\"line\":2,\"text\":\"red apple\\u000d\"}]");
+  failed += !fs_case("search binary", "search \"" FS_R "/text/bin\" \"apple\"", 0,
+    "[{\"path\":\"" FS_R "/text/bin/ok.txt\",\"line\":1,\"text\":\"apple\"}]");
+  failed += !fs_case("search NUL after 8 KiB", "search \"" FS_R "/text/late\" \"apple\"", 0,
+    "[{\"path\":\"" FS_R "/text/late/late.dat\",\"line\":2,\"text\":\"z\\u0000apple\"}]");
+  failed += !fs_case("search empty text", "search \"" FS_R "/text/order\" \"\"", 0,
+    "inl search: " FS_R "/text/order: the search text is empty");
+  failed += !fs_case("search root directory link skipped", "search \"" FS_R "/text-link\" \"apple\"", 0, "[]");
+  failed += !fs_case("search root directory link slash skipped", "search \"" FS_R "/text-link/\" \"apple\"", 0, "[]");
+  failed += !fs_case("search root file link skipped", "search \"" FS_R "/text/order/l.txt\" \"apple\"", 0, "[]");
+  failed += !fs_case("search dangling root link skipped", "search \"" FS_R "/dangling-link\" \"apple\"", 0, "[]");
+  failed += !fs_case("search file root", "search \"" FS_R "/text/order/b.txt\" \"apple\"", 0,
+    "[{\"path\":\"" FS_R "/text/order/b.txt\",\"line\":1,\"text\":\"one apple\"},"
+    "{\"path\":\"" FS_R "/text/order/b.txt\",\"line\":3,\"text\":\"apple pie\"}]");
+  failed += !fs_case("search missing root", "search \"" FS_R "/none\" \"apple\"", 0,
+    "inl search: " FS_R "/none: No such file or directory");
+  failed += !fs_disk_usage("diskUsage values", FS_R);
+  failed += !fs_disk_usage("diskUsage file path", FS_R "/files/empty.txt");
+  failed += !fs_case("diskUsage missing path", "diskUsage \"" FS_R "/none\"", 0,
+    "inl diskUsage: " FS_R "/none: No such file or directory");
+  failed += !io_driver_case("layer listDir then write",
+    "def main : IO Unit := bind (listDir \"" FS_R "/empty\") (fun (r : Sum Text Json) => bind (write \"x\") (fun (u : Unit) =>"
+    " either (fun (e : Text) => write (textAppend \"inl \" e)) (fun (j : Json) => write (jsonRender j)) r))\n",
+    "", 0, NULL, EVAL_FUEL_STEPS, "x[]", 0, NULL);
+  failed += !io_driver_case("layer 3 operations at one segment", fs_three_ops, "", 0, NULL, FS_SEGMENT_BUDGET, "ok", 0, NULL);
+  return failed;
 }
 
 static int big_fold_fuel(void) {
@@ -1236,6 +1506,7 @@ int main(void) {
     failed += !io_driver_case("the ioBind effect order",
       "def main : IO Unit := bind (write \"a\") (fun (u : Unit) => write \"b\")\n", "", 0, NULL, EVAL_FUEL_STEPS, "ab", 0, NULL);
     failed += !io_loop_rounds();
+    failed += fs_read_rows();
   }
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;

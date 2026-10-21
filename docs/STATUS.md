@@ -1210,3 +1210,77 @@ Edit sites:
 
 Each mutant ran after `git add`, with `make -B check`, and was restored
 from the index. M3 to M7 run in chunk C.
+
+### Chunk B:  driver and path regressions
+
+Chunk B adds the C side of the read operations 2, 4, 6, 8 and 10 (S6
+Q7). driver.h adds `TrashForm` and `IoEnv` (budget, in, out, argc, argv,
+trash_root, trash_form, force_exdev). `io_run` takes the env. driver.c
+adds the Json makers (`jnum`, `jobj`, `jfNil`, `jfCons`), the key and
+kind tables (made once in `io_run_init`), 5 Layer values with their
+`io_step` cases and the 5 operations:  `list_dir`, `find_paths`,
+`read_file`, `search_text` and `disk_usage`. The walk uses `lstat` and
+follows no link. listDir and find sort the names with `strcmp`. find
+matches the base name with `fnmatch` (flags 0). search skips a file with
+a NUL byte in its first 8 KiB, splits each file at `\n` and compares
+bytes. diskUsage gives `total`, `free` and `available` from `statvfs`
+(each block count times `f_frsize`). A value above INT64_MAX is decimal
+text. rt_main.c sets the trash root from HOME (macOS:  `HOME/.Trash`;
+else `XDG_DATA_HOME/Trash` or `HOME/.local/share/Trash`).
+test/path-regressions.c adds the tree helpers and 33 read rows over one
+tree, build/fs/pr/read.
+
+| Suite | Count |
+|---|---|
+| examples | 32 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 84 |
+| evals | 168 |
+| json | 32 |
+| json refusals | 4 |
+| gate | 0 failures |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 239 checked, 0 failed |
+| terminal | 12 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. The dash sweep is empty.
+
+Edit sites:
+
+- src/runtime/driver.h:  `TrashForm`, `IoEnv` and the `io_run`
+  prototype.
+- src/runtime/driver.c:  `IoNames`, the key and kind tables, `IoRun`,
+  the 5 Layer values and their `io_step` cases, `fs_text`, `fs_fail`,
+  `fs_root_stat`, `fs_walk`, `fs_entry`, `fs_scan`, `fs_read`, the 5 operations and
+  `json_num`.
+- src/runtime/rt_main.c:  `trash_root` and the env.
+- test/path-regressions.c:  `io_driver_exec`, `io_driver_run`,
+  `fs_reset`, `FsForm`, `FsItem`, `fs_item`, `fs_tree`, `fs_read_items`,
+  `fs_late`, `fs_source`, `fs_case`, `fs_near`, `fs_disk_usage`,
+  `fs_three_ops` and `fs_read_rows` (called last in main).
+
+| Id | Deviation |
+|---|---|
+| D5 | The kickoff gives no text for 3 refusals. Chunk B uses fixed texts:  `NAME: the path holds a NUL byte` (no path:  the path holds the NUL byte), `find: ROOT: the glob holds a NUL byte` and `search: ROOT: the search text is empty`. |
+| D6 | A walk error below the root names the path that failed, not the root. |
+| D7 | When `opendir` of a search root gives ENOTDIR, search reads the root as one file (row `search file root`). A missing root keeps ENOENT (row `search missing root`). |
+| D8 | diskUsage of a file path gives the object, not `inl`:  `statvfs` takes a file (row `diskUsage file path`). |
+| D9 | A full read of driver.c found 1 defect. In `search_text` (line 588), the ENOTDIR branch of a file root reset `failed` after an OOM in `fs_fail`, and the run continued with a diagnostic set. The branch now also needs `response != NULL`. Each other NULL response has an OOM diagnostic (`new_value` in eval.c calls `oom`;  `arena_text` and `hit_push` call `diag_fail`). |
+| D10 | jsonRender (src/front/jsontext.c `escape_byte`) writes `\u00XX` for each byte below 0x20. Thus the goldens hold `\u000a` for `\n`, `\u000d` for `\r` and `\u0000` for NUL. |
+| D11 | The budget probe (a runner script under $TMPDIR;  probe.c includes path-regressions.c with `main` renamed):  `fs_three_ops` (diskUsage, readFile, listDir, then `write "ok"`) fits in one segment at budget 271. At 270 it gives status 1 and EVAL_FUEL. The row uses 281 (`FS_SEGMENT_BUDGET`, the minimum + 10). |
+| D12 | `io_driver_run` is now 2 parts:  `io_driver_exec` (the status, the output bytes and the Diag) and the compare. `io_driver_exec` makes and releases its own arena. The Diag holds `def` and `msg` inline, thus it stays valid after the release. The rows `diskUsage values` and `diskUsage file path` use `io_driver_exec` and parse the output. |
+| D13 | A failure of `fs_reset` or `fs_tree` adds 1 failure to the count. The 33 rows run after it and fail at their own compare. |
+
+Chunk B runs no mutants. M3 to M7 (driver.c) run in chunk C. Their
+killers are the rows `listDir sorted`, `find link not walked`, `readFile
+NUL`, `search binary` and `diskUsage values`.
+
+The staged review found that a link supplied as the root was followed by
+listDir, find and search, against S6 Q11. The walk now inspects the root
+with lstat before opendir, including a root with trailing slashes. Search
+skips a link root and reads a regular file root directly. This replaces
+the ENOTDIR fallback described in D7 and D9. Four new rows failed before
+the fix. Eight added rows cover root links, trailing slashes, a dangling
+link and readFile following a link. After the fix, `make check` passes,
+including 239 path regressions and 12 terminal rows.
