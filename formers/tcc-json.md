@@ -4,7 +4,7 @@ Paths below are relative to this host kit, or to the root of a generated
 language. The template's `formers/FORMERS.md` gives the host-neutral laws.
 The front end in `src/front/` is a fork of the tcc-wasm front end (`README.md`,
 section Origin). Each status covers `langc check`, `langc eval` and
-`langc build`. `test/gate.sh` checks every example, every eval line in
+`langc json`. `test/gate.sh` checks every example, every eval line in
 `test/eval/expect.txt` and every JSON golden in `test/json/`. `make check`
 also runs `test/regressions.js` for type safety, complete type metadata,
 binder scope and domain declarations.
@@ -33,7 +33,7 @@ F9, F10, F14 and the F12 and F13 proofs have no JSON value of their own.
 A Sigma payload of `Eq` type is `null`.
 
 S1 rows (the coin-lang 61f1c8e kernel port, 2026-10-19). Each status
-covers `langc check`, `langc eval` and `langc build`.
+covers `langc check`, `langc eval` and `langc json`.
 
 S1 replaces the kit `Eq` encoding above: paths, including Sigma payloads,
 retain their structure. Formal `hcomp` objects include `phi`, `tube` and

@@ -11,7 +11,7 @@ From this kit directory, or from a generated language directory:
 make check
 build/langc check examples/inventory.lang
 build/langc eval examples/inventory.lang stockTotal
-build/langc build examples/inventory.lang -o inventory.json
+build/langc json examples/inventory.lang -o inventory.json
 ```
 
 The build uses TinyCC (`TCC`, default `tcc`). Validation uses TinyCC
@@ -26,11 +26,11 @@ No network access or package installation is needed.
 |---|---|
 | `langc check PROG` | Checks the program. Prints `ok`. |
 | `langc eval PROG NAME [ARGS...]` | Applies the definition `NAME` to the literal arguments and prints the normal form. A Nat overflow prints `trap`. |
-| `langc build PROG [-o OUT]` | Checks the program, evaluates each instance and writes one JSON document to stdout, or to `OUT` |
+| `langc json PROG [-o OUT]` | Checks the program, evaluates each instance and writes one JSON document to stdout, or to `OUT` |
 
 Exit 0 is success. Exit 1 is a refused program. Exit 2 is a usage or IO
 error. A refusal writes one line to stderr: `langc: CODE: NAME: message`.
-`langc build` makes the full document in memory before it writes. Thus a
+`langc json` makes the full document in memory before it writes. Thus a
 refused build writes nothing to stdout and makes no `OUT` file.
 
 ## The JSON document
@@ -78,7 +78,7 @@ starts again for each instance.
 An indexed family uses the same rules. Its index is in `type` (for
 example `Lot 3`), not in `value`.
 
-`langc build` refuses a program with these codes:
+`langc json` refuses a program with these codes:
 
 | Code | Cause |
 |---|---|
@@ -118,7 +118,7 @@ executable at build time. `domain/README.md` tells how to replace it.
 This kit is a fork of the tcc-wasm kit front end. It does not have the
 Wasm writer (`wasm.c`), the IR (`ir.h`) or the target interface
 (`target.h`). It adds `src/json.c` and `src/json.h`, and `src/main.c` has
-the verbs `check`, `eval` and `build`. The front end also fixes dependent
+the verbs `check`, `eval`, `json` and `build`. The front end also fixes dependent
 result inference, Product and Sigma eta, Sum bind error-type preservation,
 domain name checking, the F14 universe rules, and complete,
 scope-preserving value printing. The snapshot below records the original

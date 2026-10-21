@@ -3334,6 +3334,14 @@ static const Value *reduce_out(Machine *m, uint32_t inst, const Value *const *a,
   return val_op(m, VAL_OP, OP_CTOR, r->inst, r->field, args, r->argc);
 }
 
+const Value *eval_out(Machine *m, uint32_t inst, const Value *v) {
+  return v == NULL ? NULL : reduce_out(m, inst, &v, 1u);
+}
+
+const Value *eval_apply(Machine *m, const Value *fn, const Value *arg) {
+  return apply_value(m, fn, arg);
+}
+
 static const Value *reduce_op(Machine *m, Op op, uint32_t inst, uint32_t field, const Value *const *a, uint32_t n) {
   if (!arity_ok(m, op, inst, n))
     return internal(m, "an operation with the wrong number of arguments");

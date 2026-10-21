@@ -94,14 +94,14 @@ build/langc 2>/dev/null || status=$?
 status=0
 build/langc check "$tmp/missing.lang" 2>/dev/null || status=$?
 [ "$status" -eq 2 ] || { echo "FAIL missing file: want exit 2, got $status"; fail=$((fail + 1)); }
-# JSON: `langc build` of each example must equal test/json/NAME.json byte for
+# JSON: `langc json` of each example must equal test/json/NAME.json byte for
 # byte, and each golden must parse as JSON.
 jsons=0
 for prog in examples/*.lang; do
   name=$(basename "$prog" .lang)
   jsons=$((jsons + 1))
-  if ! build/langc build "$prog" >"$tmp/out.json" 2>"$tmp/err" || ! cmp -s "$tmp/out.json" "test/json/$name.json"; then
-    echo "FAIL build $prog: the output differs from test/json/$name.json"
+  if ! build/langc json "$prog" >"$tmp/out.json" 2>"$tmp/err" || ! cmp -s "$tmp/out.json" "test/json/$name.json"; then
+    echo "FAIL json $prog: the output differs from test/json/$name.json"
     fail=$((fail + 1))
   fi
 done
@@ -109,28 +109,28 @@ if ! node -e 'for (const f of process.argv.slice(1)) JSON.parse(require("fs").re
   echo "FAIL: a JSON golden does not parse"
   fail=$((fail + 1))
 fi
-echo "json: $jsons builds checked"
+echo "json: $jsons checked"
 
-# Each line of test/emit/expect.txt is `FILE CODE`. `langc build` must exit 1,
+# Each line of test/emit/expect.txt is `FILE CODE`. `langc json` must exit 1,
 # print `langc: CODE: ...` on stderr and print nothing on stdout.
 while read -r file code; do
   status=0
-  build/langc build "test/emit/$file" >"$tmp/out.json" 2>"$tmp/err" || status=$?
+  build/langc json "test/emit/$file" >"$tmp/out.json" 2>"$tmp/err" || status=$?
   case "$status:$(head -n 1 "$tmp/err"):$(wc -c <"$tmp/out.json" | tr -d ' ')" in
     "1:langc: $code: "*":0") ;;
-    *) echo "FAIL build $file: want exit 1, $code and no stdout, got exit $status"; fail=$((fail + 1)) ;;
+    *) echo "FAIL json $file: want exit 1, $code and no stdout, got exit $status"; fail=$((fail + 1)) ;;
   esac
 done <test/emit/expect.txt
-echo "build refusals: $(wc -l <test/emit/expect.txt | tr -d ' ') checked"
+echo "json refusals: $(wc -l <test/emit/expect.txt | tr -d ' ') checked"
 
-# -o writes the same document; a refused build leaves no file.
-build/langc build examples/formers.lang -o "$tmp/o.json" && cmp -s "$tmp/o.json" test/json/formers.json \
-  || { echo "FAIL build -o: the file differs"; fail=$((fail + 1)); }
-build/langc build test/emit/trap.lang -o "$tmp/no.json" 2>/dev/null || true
-[ ! -e "$tmp/no.json" ] || { echo "FAIL build -o: a refused build wrote a file"; fail=$((fail + 1)); }
+# -o writes the same document; a refused json run leaves no file.
+build/langc json examples/formers.lang -o "$tmp/o.json" && cmp -s "$tmp/o.json" test/json/formers.json \
+  || { echo "FAIL json -o: the file differs"; fail=$((fail + 1)); }
+build/langc json test/emit/trap.lang -o "$tmp/no.json" 2>/dev/null || true
+[ ! -e "$tmp/no.json" ] || { echo "FAIL json -o: a refused run wrote a file"; fail=$((fail + 1)); }
 status=0
-build/langc build examples/formers.lang -x 2>/dev/null >/dev/null || status=$?
-[ "$status" -eq 2 ] || { echo "FAIL build usage: want exit 2, got $status"; fail=$((fail + 1)); }
+build/langc json examples/formers.lang -x 2>/dev/null >/dev/null || status=$?
+[ "$status" -eq 2 ] || { echo "FAIL json usage: want exit 2, got $status"; fail=$((fail + 1)); }
 
 rm -rf "$tmp"
 

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "front/check.h"
+#include "build.h"
 #include "front/front.h"
 #include "json.h"
 
@@ -12,6 +13,7 @@
 typedef enum {
   CMD_CHECK,
   CMD_EVAL,
+  CMD_JSON,
   CMD_BUILD
 } Command;
 
@@ -21,7 +23,7 @@ typedef struct {
   const char *entry;
   char **args;
   int arg_count;
-  const char *out_path; /* NULL: stdout */
+  const char *out_path; /* json: NULL is stdout. build: required. */
 } Options;
 
 static const struct {
@@ -30,13 +32,15 @@ static const struct {
 } COMMANDS[] = {
   {"check", CMD_CHECK},
   {"eval", CMD_EVAL},
+  {"json", CMD_JSON},
   {"build", CMD_BUILD},
 };
 
 static int usage(FILE *err) {
   fputs("usage: langc check PROG\n"
         "       langc eval PROG NAME [ARGS...]\n"
-        "       langc build PROG [-o OUT]\n", err);
+        "       langc json PROG [-o OUT]\n"
+        "       langc build PROG -o OUT\n", err);
   return 2;
 }
 
@@ -50,13 +54,22 @@ static int find_command(const char *word, Command *out) {
   return 0;
 }
 
-static int parse_build_options(int argc, char **argv, Options *opt, Diag *diag) {
+static int parse_json_options(int argc, char **argv, Options *opt, Diag *diag) {
   if (argc == 3) return 1;
   if (argc == 5 && strcmp(argv[3], "-o") == 0) {
     opt->out_path = argv[4];
     return 1;
   }
-  return diag_fail(diag, "USAGE", NULL, "build takes PROG and an optional -o OUT");
+  return diag_fail(diag, "USAGE", NULL, "json takes PROG and an optional -o OUT");
+}
+
+/* The console build (S5 Q9 (a)): -o OUT is required. */
+static int parse_build_options(int argc, char **argv, Options *opt, Diag *diag) {
+  if (argc == 5 && strcmp(argv[3], "-o") == 0) {
+    opt->out_path = argv[4];
+    return 1;
+  }
+  return diag_fail(diag, "USAGE", NULL, "build takes PROG and -o OUT");
 }
 
 static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
@@ -74,6 +87,8 @@ static int parse_options(int argc, char **argv, Options *opt, Diag *diag) {
       opt->args = argv + 4;
       opt->arg_count = argc - 4;
       return 1;
+    case CMD_JSON:
+      return parse_json_options(argc, argv, opt, diag);
     case CMD_BUILD:
       return parse_build_options(argc, argv, opt, diag);
   }
@@ -118,7 +133,9 @@ static int run(const Options *opt, Arena *arena, Diag *diag) {
       return 0;
     case CMD_EVAL:
       return eval_command(&machine, opt->entry, opt->args, opt->arg_count, stdout, stderr);
-    case CMD_BUILD: {
+    case CMD_BUILD:
+      return build_main(&machine) && console_build(arena, text, len, opt->out_path, diag) ? 0 : 1;
+    case CMD_JSON: {
       const char *doc = NULL;
       size_t doc_len = 0;
       if (!json_document(&machine, &doc, &doc_len)) return 1;

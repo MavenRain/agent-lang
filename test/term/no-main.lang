@@ -1,0 +1,2 @@
+-- No definition main: BUILD_MAIN.
+def other : Nat := 1

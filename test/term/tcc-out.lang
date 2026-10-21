@@ -1,0 +1,3 @@
+-- A good program. The runner writes it into a directory that does not
+-- exist, thus libtcc refuses the output file: BUILD_TCC.
+def main : IO Unit := write "hi\n"

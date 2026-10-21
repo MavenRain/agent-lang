@@ -1,9 +1,12 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "front/front.h"
 #include "front/check.h"
 #include "json.h"
+#include "runtime/driver.h"
 
 static int cases_run = 0;
 
@@ -126,6 +129,77 @@ static int io_deep_type(void) {
   }
   arena_release(&arena);
   return ok;
+}
+
+/* Runs main of SOURCE with the IO driver (S5 chunk B). INPUT is the
+   standard input. READ_ONLY gives an output stream that refuses each
+   write: /dev/null for reading (macOS fmemopen in mode "r" takes
+   writes). Compares the status, the output bytes and the diagnostic code
+   (NULL: no diagnostic). */
+static int io_driver_run(const char *label, const char *source, const char *input, int argc, char *const *argv,
+                         uint64_t budget, int read_only, const char *out, int status, const char *code) {
+  Arena arena;
+  Machine m;
+  Diag diag;
+  uint32_t index = 0;
+  char *bytes = NULL;
+  size_t len = 0;
+  int got = -1;
+  int ok;
+  FILE *in;
+  FILE *stream;
+  diag_init(&diag);
+  arena_init(&arena, (size_t)128 << 20);
+  /* fmemopen of size 0 can fail, thus an empty input is /dev/null. */
+  in = input[0] ? fmemopen((void *)input, strlen(input), "r") : fopen("/dev/null", "r");
+  stream = read_only ? fopen("/dev/null", "r") : open_memstream(&bytes, &len);
+  if (in && stream && checked(&arena, &m, &diag, source) && io_main(&m, &index))
+    got = io_run(&m, def_value(&m, index), budget, in, stream, argc, argv);
+  if (in) fclose(in);
+  if (stream) fclose(stream);
+  ok = got == status && (code ? diag.set && strcmp(diag.code, code) == 0 : !diag.set)
+    && len == strlen(out) && (len == 0 || memcmp(bytes, out, len) == 0);
+  if (!ok) {
+    fprintf(stderr, "FAIL IO driver: %s: status %d, %zu bytes \"%.*s\"\n", label, got, len, (int)len, bytes ? bytes : "");
+    diag_print(&diag, stderr);
+  }
+  free(bytes);
+  arena_release(&arena);
+  return ok;
+}
+
+static int io_driver_case(const char *label, const char *source, const char *input, int argc, char *const *argv,
+                          uint64_t budget, const char *out, int status, const char *code) {
+  cases_run++;
+  return io_driver_run(label, source, input, argc, argv, budget, 0, out, status, code);
+}
+
+/* The write gives the exact bytes, and a write error is IO_WRITE. */
+static int io_write_bytes(void) {
+  const char *source = "def main : IO Unit := write \"a\\tb\\n\"\n";
+  int exact;
+  int refused;
+  cases_run++;
+  exact = io_driver_run("write bytes", source, "", 0, NULL, EVAL_FUEL_STEPS, 0, "a\tb\n", 0, NULL);
+  refused = io_driver_run("write error", source, "", 0, NULL, EVAL_FUEL_STEPS, 1, "", 1, "IO_WRITE");
+  return exact && refused;
+}
+
+/* Reads one line and writes it with a bar, or writes none at the end of
+   the input. */
+static const char io_echo[] =
+  "def main : IO Unit := bind readLine (fun (r : Option Text) => option (write \"none\") (fun (t : Text) => write (textAppend t \"|\")) r)\n";
+/* Echoes each line until the end of the input. One round takes at most 290
+   fuel. */
+static const char io_echo_loop[] =
+  "def main : IO Unit := ioLoop Unit Unit (fun (u : Unit) => bind readLine (fun (r : Option Text) => option (ioPure (Sum Unit Unit) (inl unit)) (fun (t : Text) => ioMap Unit (Sum Unit Unit) (fun (x : Unit) => inr x) (write (textAppend t \"\\n\"))) r)) unit\n";
+
+/* 100 lines at a budget of 1000: the budget is for each segment. */
+static int io_segment_budget(void) {
+  char input[301] = "";
+  unsigned i;
+  for (i = 0; i < 100u; i++) strcat(input, "ab\n");
+  return io_driver_case("a small budget for each segment", io_echo_loop, input, 0, NULL, 1000, input, 0, NULL);
 }
 
 static int big_fold_fuel(void) {
@@ -1138,6 +1212,18 @@ int main(void) {
     "def good : IO Nat := map (fun (n : Nat) => natAdd n 1) (pure 7)\n"
     "def bound : IO Nat := bind (pure 7) (fun (n : Nat) => pure n)\n");
   failed += !io_deep_type();
+  {
+    static char *const io_argv[] = {"prog", "a", "b c"};
+    failed += !io_driver_case("echo", io_echo, "ab\ncd\n", 0, NULL, EVAL_FUEL_STEPS, "ab|", 0, NULL);
+    failed += !io_driver_case("end of input", io_echo, "", 0, NULL, EVAL_FUEL_STEPS, "none", 0, NULL);
+    failed += !io_driver_case("a last line with no newline", io_echo, "xy", 0, NULL, EVAL_FUEL_STEPS, "xy|", 0, NULL);
+    failed += !io_driver_case("args", "def main : IO Unit := bind args (fun (j : Json) => write (jsonRender j))\n", "",
+      3, io_argv, EVAL_FUEL_STEPS, "[\"a\",\"b c\"]", 0, NULL);
+    failed += !io_write_bytes();
+    failed += !io_segment_budget();
+    failed += !io_driver_case("the tau loop trap", "def main : IO Unit := unfold (fun (u : Unit) => tau Unit Unit u) unit\n", "",
+      0, NULL, 1000, "", 1, "EVAL_FUEL");
+  }
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
 }

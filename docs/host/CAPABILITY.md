@@ -40,7 +40,7 @@ kit, or to the root of a generated language.
   nesting of 1000 (`src/front/parser.c:16`). These limits keep the C stack
   bounded. `test/gate.sh` checks a nesting of 1100 parentheses.
 - The evaluator has a fuel of 20,000,000 steps for each instance
-  (`src/front/core.h:17`). `langc build` starts the fuel again for each
+  (`src/front/core.h:17`). `langc json` starts the fuel again for each
   instance.
 - All memory comes from one arena with a limit of 1 GiB (`src/main.c:10`).
   A run that reaches it stops with `OOM`.
@@ -48,7 +48,7 @@ kit, or to the root of a generated language.
 
 ## Output
 
-- `langc build` makes the full JSON document in the arena, then writes
+- `langc json` makes the full JSON document in the arena, then writes
   it. A refused build writes no partial document and no `-o` file.
 - The writer walks list spines in a loop, so a long list does not use C
   stack. Other nesting counts against the JSON depth of 2000

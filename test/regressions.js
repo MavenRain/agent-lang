@@ -26,7 +26,7 @@ function source(text) {
 }
 
 function built(text, exe = compiler) {
-  const r = run(exe, ['build', source(text)]);
+  const r = run(exe, ['json', source(text)]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
   assert(!r.stdout.includes('\ufffd'), 'output is not UTF-8');
@@ -36,7 +36,7 @@ function built(text, exe = compiler) {
 function refused(text, code, exe = compiler) {
   const file = source(text);
   const out = path.join(tmp, `output-${sequence++}.json`);
-  for (const args of [['build', file], ['build', file, '-o', out]]) {
+  for (const args of [['json', file], ['json', file, '-o', out]]) {
     const r = run(exe, args);
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert(r.stderr.startsWith(`langc: ${code}: `), r.stderr);
@@ -49,17 +49,22 @@ function domainCompiler(text) {
   const domain = source(text);
   const embedded = path.join(tmp, `domain-${sequence++}.c`);
   const exe = path.join(tmp, `langc-${sequence++}`);
-  // Like the Makefile, TCC can name a compiler plus driver flags.
-  function tcc(args) {
-    const r = spawnSync('sh', ['-c', 'exec $TCC "$@"', 'tcc', ...args], {
-      cwd: kit, encoding: 'utf8', env: {...process.env, TCC: process.env.TCC || 'tcc'},
+  // Like the Makefile, TCC and CC can name a compiler plus driver flags.
+  // TCC embeds the domain. CC links libtcc.a, because it holds Mach-O
+  // objects. The build verb of this compiler has the default domain in its
+  // runtime, thus the tests use only check and json.
+  function compile(name, fallback, args) {
+    const r = spawnSync('sh', ['-c', `exec $${name} "$@"`, name, ...args], {
+      cwd: kit, encoding: 'utf8', env: {...process.env, [name]: process.env[name] || fallback},
     });
     assert.ifError(r.error);
     assert.equal(r.status, 0, r.stdout + r.stderr);
   }
-  tcc(['-run', 'gen/embed.c', domain, embedded]);
+  compile('TCC', 'tcc', ['-run', 'gen/embed.c', domain, embedded]);
   const front = ['base', 'lexer', 'parser', 'front', 'eval', 'check', 'big', 'jsontext'].map(n => `src/front/${n}.c`);
-  tcc(['-std=c99', '-Wall', '-Werror', '-Isrc', '-o', exe, 'src/main.c', ...front, 'src/json.c', embedded]);
+  const home = process.env.TCC_HOME || path.join(os.homedir(), '.local');
+  compile('CC', 'cc', ['-std=c99', '-Wall', '-Werror', '-Isrc', `-I${home}/include`, `-DTCC_LIB_DIR="${home}/lib/tcc"`, '-o', exe,
+    'src/main.c', 'src/build.c', 'src/runtime/driver.c', ...front, 'src/json.c', embedded, 'build/runtime.o', `${home}/lib/libtcc.a`]);
   return exe;
 }
 

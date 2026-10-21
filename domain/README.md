@@ -28,7 +28,7 @@ def logLength : (l : Log) -> Nat :=
 - A family lives in the largest universe of its fields. For example,
   `family U := makeU (decode : Type 0)` has type `Type 1`.
 - Domain definitions are not instances. They do not appear in the JSON
-  output of `langc build`.
+  output of `langc json`.
 
 The JSON form of a family value comes from its declaration: a string for
 a family whose constructors have no fields, an object of fields for a

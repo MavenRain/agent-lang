@@ -22,7 +22,7 @@ try {
     return result.stdout;
   };
   assert.equal(run("eval", source, "deep"), functionBody + "\n");
-  const doc = JSON.parse(run("build", source));
+  const doc = JSON.parse(run("json", source));
   assert.equal(doc.instances.length, 1);
   assert.match(doc.instances[0].type, /PathP \(fun _ => Nat\) n64 n64/);
   let value = doc.instances[0].value;

@@ -397,6 +397,10 @@ const Env *env_push(Machine *m, const Env *env, const Value *value);
 const Value *def_value(Machine *m, uint32_t index);
 const Value *eval_core(Machine *m, const Env *env, const Core *core);
 const Value *apply_value(Machine *m, const Value *fn, const Value *arg);
+/* The IO driver (S5 chunk B) uses these two. eval_out is out of V at the
+   cofamily INST: the layer of V, for 1 fuel. eval_apply is apply_value. */
+const Value *eval_out(Machine *m, uint32_t inst, const Value *v);
+const Value *eval_apply(Machine *m, const Value *fn, const Value *arg);
 /* transp LINE PHI BASE, for JSON rule 1 (S3b). LINE is a path value in U. */
 const Value *val_transp(Machine *m, const Value *line, const Value *phi, const Value *base);
 /* For JSON rule 2 (S6b): the component FIELD (0 the witness, 1 the

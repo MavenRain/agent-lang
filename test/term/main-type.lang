@@ -1,0 +1,2 @@
+-- main does not convert with IO Unit: BUILD_MAIN_TYPE.
+def main : IO Nat := pure 7
