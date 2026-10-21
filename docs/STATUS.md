@@ -1605,7 +1605,11 @@ with `git checkout -- src/runtime/driver.c`. `git diff --quiet` passed
 after each restore. 5 of 5 S6b driver mutants KILLED (M8 is KILLED in S6b chunk A).
 
 The USER live trash probe (agent-lang-work/S6b-trash-probe.sh, outside
-the sandbox, at the real HOME):  OPEN (the USER did not run it in this session).
+the sandbox, at the real HOME):  PASS. The USER ran it on 2026-10-21 at
+13:18, in the S6 close session. The response is `unit` and the probe rc
+is 0. `ls -l` of the source gives `No such file or directory`.
+`ls -l ~/.Trash` shows one probe entry,
+`agent-lang-trash-probe-20261021131849.txt` (32 bytes, the probe text).
 
 | Id | Deviation |
 |---|---|
@@ -1628,3 +1632,69 @@ test/terminal-env.c checks the copied environment, preservation of the
 parent environment, other fixtures and an overlong HOME. Before the
 fix, the external-root and long-path checks fail. Makefile runs these
 four checks as part of `make check` and includes the source in check-clang.
+
+## S6 close:  the filesystem operations 2 to 10 (2026-10-21)
+
+S6 is DONE. S6a added the filesystem read operations 2, 4, 6, 8 and 10
+(`listDir`, `find`, `readFile`, `search`, `diskUsage`). S6b added the
+write operations 3, 5, 7 and 9 (`makeDir`, `move`, `copy`, `trash`).
+The rulings Q1 to Q16 are (a) (docs/PLAN.md, `### USER ruling (S6)`).
+The base is 8534b3b, the USER commit of S6b chunk C with the USER review
+fix (D1). The close changes the docs only:  docs/PLAN.md (the row S6b)
+and docs/STATUS.md (the trash probe in S6b chunk C, and this section).
+
+| Suite | S5 end | S6 end |
+|---|---|---|
+| examples | 32 | 33 checked, 0 failed |
+| parse refusals | 14 | 14 |
+| check refusals | 81 | 86 |
+| evals | 163 | 179 |
+| json | 32 | 33 |
+| json refusals | 4 | 4 |
+| gate | 0 failures | 0 failures |
+| regressions | 6 | 6 checked, 0 failed |
+| printer regressions | 2 | 2 |
+| path regressions | 206 | 262 checked, 0 failed |
+| terminal environment | (no suite) | 4 checked, 0 failed |
+| terminal | 12 | 21 checked, 0 failed |
+
+`make -B check-clang` (`cc -fsyntax-only`) gives rc 0. `git diff
+--check` and the dash sweep are empty.
+
+| Id | Chunk | Mutant | First killer | Result |
+|---|---|---|---|---|
+| M1 | S6a A | ioBind leg `inl`:  the searchOp arm gives `q p` | gate.sh `FAIL eval io searchTrace` | KILLED |
+| M2 | S6a A | `find`:  `findOp ... g r` | gate.sh `FAIL eval io findTrace` | KILLED |
+| M3 | S6a C | `fs_walk`:  the skip of `.` and `..` only when `deep` is not 0 | path regression `listDir sorted` | KILLED |
+| M4 | S6a C | `fs_entry`:  `stat` in place of `lstat` | path regression `listDir sorted` | KILLED |
+| M5 | S6a C | `read_file`:  the Text length from `strnlen` | path regression `readFile NUL` | KILLED |
+| M6 | S6a C | `search_text`:  no 8 KiB NUL test | path regression `search binary` | KILLED |
+| M7 | S6a C | `disk_usage`:  `total` from `f_bsize` in place of `f_frsize` | path regression `diskUsage values` | KILLED |
+| M8 | S6b A | `copy`:  `copyOp ... t f` (from and to swapped) | gate.sh `FAIL eval io copyTrace` | KILLED |
+| M9 | S6b C | `move_path`:  no `fs_there (TO)` test | path regression `move destination there` | KILLED |
+| M10 | S6b C | `fs_copy_file`:  `((void)mode, 1)` in place of the `fchmod` | path regression `move EXDEV` | KILLED |
+| M11 | S6b C | `trash_macos`:  `unlink (path)` in place of `rename (path, dest)` | path regression `trash macOS form` | KILLED |
+| M12 | S6b C | `make_dir`:  one `mkdir` of the full path | path regression `makeDir parents` | KILLED |
+| M13 | S6b C | `layer_of`:  moveOp gives `LAYER_COPY` | path regression `move file` | KILLED |
+
+13 of 13 S6 mutants KILLED. The mutant rows of each chunk give the
+lines and the number of rows that fail.
+
+Open items:
+
+- S6b chunk B D1:  no path regression tests an empty `makeDir` path.
+- S6b chunk B D3:  no path regression tests a failed copy leg of an
+  `EXDEV` move (the source and the partial destination stay).
+- S6b chunk B D4:  no path regression tests an `EXDEV` move into its own
+  tree. The copy has the row `copy into own tree`.
+- S6b chunk B D5:  no row tests the fixed text of the kind (`copy
+  cannot copy this kind`) or of no HOME (`there is no trash directory`).
+- S6b chunk C D4:  the terminal goldens hold the macOS form. On Linux,
+  trash-home uses the XDG trash under HOME/.local/share, and its listDir
+  of HOME/.Trash differs from the golden. There are no Linux goldens.
+
+| Id | Deviation |
+|---|---|
+| D1 | HEAD is 8534b3b, the USER commit of S6b chunk C with a review fix (tree 394220c4, not the staged tree 54cb58b7). Makefile:  the target build/terminal-env, which `make check` runs before build/terminal, and test/terminal-env.c in check-clang. test/terminal.c:  `fixture_env` removes XDG_DATA_HOME and refuses an overlong HOME (S6b chunk C, `#### Chunk C staged review`). test/terminal-env.c:  4 checks, the new suite `terminal environment`. The USER ruled (2026-10-21) to use HEAD as the base. |
+| D2 | The prompt puts M1 to M7 in S6a chunk C. M1 and M2 ran in S6a chunk A (gate.sh killers at the trace defs). M3 to M7 ran in S6a chunk C. |
+| D3 | docs/PLAN.md has no S6 milestone line. The rows S6a and S6b give the S6 status. The row S6b now records the trash probe, the suite `terminal environment` and the S6 close. |
