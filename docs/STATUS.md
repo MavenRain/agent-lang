@@ -1423,3 +1423,111 @@ the budget from the environment and bisects):
 M8 ran after `git add`, with `make -B check`, and was restored with
 `git checkout -- domain/domain.lang` (`git diff --quiet` gives 0). M9 to
 M13 run in S6b chunk C (driver mutants).
+
+### Chunk B:  driver and path regressions
+
+Chunk B adds the driver of the write operations 3, 5, 7 and 9 (kickoff
+1.2, S6 Q6 and Q7 (a)) and 23 path regressions. Each response is
+`inr unit`, or `inl` of the text `OP: PATH: TEXT`. The guest layer does
+not change (chunk A), thus the budgets do not change.
+
+| Suite | Count |
+|---|---|
+| examples | 33 checked, 0 failed |
+| parse refusals | 14 |
+| check refusals | 86 |
+| evals | 176 |
+| json | 33 |
+| json refusals | 4 |
+| gate | 0 failures |
+| regressions | 6 |
+| printer regressions | 2 |
+| path regressions | 262 checked, 0 failed |
+| terminal | 17 checked, 0 failed |
+
+`cc -fsyntax-only` (check-clang) passes. `git diff --check` and the dash
+sweep are empty. The budgets of `ioLoop of 1000 rounds` (372) and
+`FS_SEGMENT_BUDGET` (305) pass with no change.
+
+Edit sites:
+
+- src/runtime/driver.c:  `#include <time.h>`;  `IoNames` (`make_dir`,
+  `move`, `copy`, `trash`);  `Layer` (`LAYER_MAKE_DIR`, `LAYER_MOVE`,
+  `LAYER_COPY`, `LAYER_TRASH`);  `io_names` (the field counts 2, 3, 3
+  and 2 of `makeDirOp`, `moveOp`, `copyOp` and `trashOp`;  the
+  diagnostic text says `S6b shape`);  `layer_of`;  4 `io_step` cases
+  (`-Wswitch-enum`). The new functions between `disk_usage` and
+  `io_run_init`:  `fs_unit`, `FsFault`, `fs_fault` (it keeps the first
+  failure), `fs_fault_value`, `fs_join`, `fs_write_all`, `make_dir`,
+  `fs_copy_file` (O_EXCL, then `fchmod (mode & 07777)`), `fs_copy_dir`
+  (mkdir 0700, the entries, then `chmod`), `fs_copy_link`, `fs_copy`,
+  `fs_inside` (the realpath of the parent of TO, the last slashes cut),
+  `fs_copy_top`, `fs_remove`, `fs_two_paths`, `fs_there`, `move_path`,
+  `copy_path`, `trash_name`, `trash_dir`, `trash_info`, `trash_macos`,
+  `trash_xdg` and `trash_path`. driver.h, rt_main.c and the `io_run`
+  callers do not change (IoEnv already has `trash_root`, `trash_form`
+  and `force_exdev`).
+- test/path-regressions.c:  the file statics `pr_trash_root`
+  (`PR_TRASH_ROOT`, build/fs/pr/trash), `pr_trash_form` and
+  `pr_force_exdev` that `io_driver_exec` gives to IoEnv (a row sets
+  them, then sets the defaults back);  `fs_unit_source` and
+  `fs_write_case`;  the tree checks `fs_is`, `fs_gone`, `fs_bytes`,
+  `fs_mode`, `fs_target` and `fs_trash_info` (each prints a FAIL line
+  and adds no case);  `FS_W`, `FS_COUNT` and 13 item tables;
+  `fs_write_rows` after `fs_read_rows` in `main`.
+
+The 23 rows (R is the row root under build/fs/pr/;  each row makes its
+own tree after the read rows reset build/fs/pr/):
+
+| Row | Tree | Response | Tree checks |
+|---|---|---|---|
+| `makeDir parents` | empty | `unit` | R/a/b/c is a directory |
+| `makeDir there` | d | `unit` | R/d is a directory |
+| `makeDir file there` | f | `inl makeDir: R/f: File exists` | the bytes of R/f |
+| `makeDir parent file` | f | `inl makeDir: R/f/sub: Not a directory` | the bytes of R/f |
+| `move file` | a.txt | `unit` | a.txt gone, the bytes at b.txt |
+| `move directory` | d, d/f.txt | `unit` | d gone, e/f.txt |
+| `move destination there` | a.txt, b.txt | `inl move: R/b.txt: File exists` | the bytes of both |
+| `move missing source` | empty | `inl move: R/none: No such file or directory` | b.txt not made |
+| `move EXDEV` (`pr_force_exdev` 1) | d, d/f.txt (0640), d/l to f.txt | `unit` | d gone, e mode 0755, e/f.txt bytes and mode 0640, e/l to f.txt |
+| `copy mode` | a.sh (0777) | `unit` | b.sh mode 0777 under umask 022, the bytes of a.sh and b.sh |
+| `copy tree link` | d, d/f.txt, d/sub, d/sub/g.txt, d/l to f.txt | `unit` | e/f.txt, e/sub, e/sub/g.txt, e/l a link to f.txt, d/l and d/f.txt stay |
+| `copy destination there` | a.txt, b.txt | `inl copy: R/b.txt: File exists` | the bytes of both |
+| `copy into own tree` | d, d/f.txt | `inl copy: R/d/sub: the destination is in the source tree` | d/sub not made |
+| `copy missing source` | empty | `inl copy: R/none: No such file or directory` | b.txt not made |
+| `trash macOS form` (root R/home/.Trash) | a.txt, home | `unit` | a.txt gone, .Trash/a.txt, .Trash mode 0700 |
+| `trash collision` (root R/home/.Trash) | a.txt, home/.Trash/a.txt | `unit` | a.txt gone, `.Trash/a 2.txt` new bytes, `.Trash/a.txt` old bytes |
+| `trash XDG form` (TRASH_XDG, root R/data/Trash) | a.txt, data | `unit` | a.txt gone, files/a.txt, info/a.txt.trashinfo (D8) |
+| `trash missing path` (root R/home/.Trash) | home | `inl trash: R/none: No such file or directory` | R/home/.Trash not made |
+| `layer makeDir copy listDir` | src.txt | `[{"name":"dst.txt","kind":"file"}]` | the bytes of new/sub/dst.txt |
+| `trash XDG missing parents` (root R/home/.local/share/Trash) | a.txt, home | `unit` | missing parents made, a.txt gone, files/a.txt bytes and info/a.txt.trashinfo |
+| `copy restrictive umask` (umask 0777) | d, d/f.txt (0640), d/l to f.txt | `unit` | e mode 0755, e/f.txt bytes and mode 0640, e/l readable and pointing to f.txt |
+| `trash restrictive umask` (umask 0777, root R/home/.Trash) | a.txt, home | `unit` | a.txt gone, .Trash mode 0700, .Trash/a.txt bytes |
+| `trash XDG restrictive umask` (umask 0777, root R/home/.local/share/Trash) | a.txt, home | `unit` | missing parents made, Trash, files and info mode 0700, note mode 0600, file bytes and note contents, source gone |
+
+The labels `makeDir parents`, `move file`, `move destination there`,
+`copy mode` and `trash macOS form` are the killer rows of kickoff
+section 4 (M9 to M13 run in chunk C).
+
+| Id | Deviation |
+|---|---|
+| D1 | makeDir names the path as given:  a file at the path gives `File exists`, a file at a parent gives `Not a directory`, and an empty path gives ENOENT. The rows `makeDir file there` and `makeDir parent file` test the first two. No row tests the empty path. |
+| D2 | move and copy do `lstat (TO)` first:  a TO that is there gives `OP: TO: File exists` (`rename` replaces a file and an empty directory with no error, kickoff section 5). A rename error names FROM. The rows `move destination there`, `copy destination there` and `move missing source` test this. |
+| D3 | The EXDEV leg of move (or `force_exdev`) runs `fs_copy_top`, then `fs_remove (FROM)`. A failed copy keeps the source and the partial destination:  the driver does not delete a path that it did not surely make. The row `move EXDEV` tests the leg that succeeds only. |
+| D4 | `fs_copy_top` also guards the EXDEV leg of move:  without the in-tree test, a move of `d` to `d/sub` copies with no end. The row `copy into own tree` tests the copy. No row tests the move. |
+| D5 | Fixed texts (not `strerror`):  `copy: TO: the destination is in the source tree`;  `OP: PATH: copy cannot copy this kind (not a file, a directory or a link)`;  `trash: PATH: there is no trash directory (no HOME)`. Only the first has a row. |
+| D6 | trash does `lstat (PATH)` first:  a missing path gives `trash: PATH: No such file or directory` before the driver makes the root (the row `trash missing path` checks that the root is not there). The name is the base name with the last slashes cut. At a collision, ` N` goes before the last extension (a leading dot is not an extension):  the row `trash collision`. |
+| D7 | The XDG form uses the same names. It checks `files/NAME` with lstat, makes `info/NAME.trashinfo` with O_EXCL (at EEXIST, the next name), then renames. When the rename fails, it removes only the info file. The info text:  `[Trash Info]\nPath=`, the percent encoded absolute path (the cwd, `/` and a relative path;  `A-Z a-z 0-9 - . _ ~ /` are kept), then `\nDeletionDate=YYYY-MM-DDThh:mm:ss\n` (the local time). |
+| D8 | The row `trash XDG form` encodes the cwd as the driver does. The prompt gives the raw getcwd text. The two texts are the same when the cwd holds only kept bytes. The encode keeps the row correct in a checkout path with a space. The row checks the 19 date bytes by their shape. |
+| D9 | The rows have more tree checks than the prompt names:  `move EXDEV` checks the mode 0755 of the directory (the `chmod` at the end of `fs_copy_dir`), `copy mode` checks that the source stays, and `layer makeDir copy listDir` checks the bytes of dst.txt. |
+
+Review fixes add four rows to the 19 kickoff rows. The staged driver
+passed the original 258 path regressions, then failed all four new rows.
+XDG trash now makes missing parent directories, so a fresh home without
+`.local/share` works. Newly created trash directories have mode 0700
+and XDG info files have mode 0600 even under umask 0777. Existing
+directory modes stay unchanged. Copy makes its temporary directory
+usable before copying children, then restores the source mode. On macOS
+it also preserves symlink modes without following the links: umask can
+otherwise make a copied link unreadable. The copy row checks a file,
+directory and symlink under that mask. All four rows pass after the fixes.

@@ -137,6 +137,14 @@ static int io_deep_type(void) {
   return ok;
 }
 
+/* The trash and EXDEV fields of the IoEnv of a run. A write row sets them,
+   then sets the defaults back. The default trash root is under build/fs/pr/
+   (S6 Q7 (a)). */
+#define PR_TRASH_ROOT "build/fs/pr/trash"
+static const char *pr_trash_root = PR_TRASH_ROOT;
+static TrashForm pr_trash_form = TRASH_MACOS;
+static int pr_force_exdev = 0;
+
 /* Runs SOURCE in the IO driver: gives the status (-1 when the run did not
    start), *BYTES (malloc'd, *LEN bytes and a NUL after them; NULL when
    READ_ONLY) and *DIAG. */
@@ -156,8 +164,7 @@ static int io_driver_exec(const char *source, const char *input, int argc, char 
   in = input[0] ? fmemopen((void *)input, strlen(input), "r") : fopen("/dev/null", "r");
   stream = read_only ? fopen("/dev/null", "r") : open_memstream(bytes, len);
   if (in && stream && checked(&arena, &m, diag, source) && io_main(&m, &index)) {
-    /* The trash root of the S6b rows is under build/fs/pr/ (S6 Q7 (a)). */
-    IoEnv env = {budget, in, stream, argc, argv, "build/fs/pr/trash", TRASH_MACOS, 0};
+    IoEnv env = {budget, in, stream, argc, argv, pr_trash_root, pr_trash_form, pr_force_exdev};
     got = io_run(&m, def_value(&m, index), &env);
   }
   if (in) fclose(in);
@@ -480,6 +487,327 @@ static int fs_read_rows(void) {
     " either (fun (e : Text) => write (textAppend \"inl \" e)) (fun (j : Json) => write (jsonRender j)) r))\n",
     "", 0, NULL, EVAL_FUEL_STEPS, "x[]", 0, NULL);
   failed += !io_driver_case("layer 3 operations at one segment", fs_three_ops, "", 0, NULL, FS_SEGMENT_BUDGET, "ok", 0, NULL);
+  return failed;
+}
+
+/* The guest text of a write row (kickoff row S6b B) into SOURCE: CALL,
+   then "inl " and the text of an inl, or "unit" for the inr. Gives 0 when
+   SOURCE is too small. */
+static int fs_unit_source(char *source, size_t cap, const char *call) {
+  int len = snprintf(source, cap,
+    "def main : IO Unit := bind (%s) (fun (r : Sum Text Unit) => either (fun (e : Text) => write (textAppend \"inl \" e))"
+    " (fun (u : Unit) => write \"unit\") r)\n", call);
+  return len >= 0 && (size_t)len < cap;
+}
+
+static int fs_write_case(const char *label, const char *call, const char *out) {
+  char source[1024];
+  if (!fs_unit_source(source, sizeof source, call)) {
+    cases_run++;
+    fprintf(stderr, "FAIL fs row: %s: the source is too long\n", label);
+    return 0;
+  }
+  return io_driver_case(label, source, "", 0, NULL, EVAL_FUEL_STEPS, out, 0, NULL);
+}
+
+/* The tree checks of the write rows. Each check prints a FAIL line and
+   adds no case. */
+
+/* PATH is there with the FORM (lstat: a link is not followed). */
+static int fs_is(const char *label, const char *path, FsForm form) {
+  static const char *const names[] = {"directory", "file", "link", "fifo"};
+  struct stat st;
+  int ok = lstat(path, &st) == 0;
+  switch (form) {
+  case FS_DIR:
+    ok = ok && S_ISDIR(st.st_mode);
+    break;
+  case FS_FILE:
+    ok = ok && S_ISREG(st.st_mode);
+    break;
+  case FS_LINK:
+    ok = ok && S_ISLNK(st.st_mode);
+    break;
+  case FS_FIFO:
+    ok = ok && S_ISFIFO(st.st_mode);
+    break;
+  }
+  if (!ok) fprintf(stderr, "FAIL fs check: %s: %s is not a %s\n", label, path, names[form]);
+  return ok;
+}
+
+/* PATH is not there (lstat gives ENOENT). */
+static int fs_gone(const char *label, const char *path) {
+  struct stat st;
+  int ok = lstat(path, &st) != 0 && errno == ENOENT;
+  if (!ok) fprintf(stderr, "FAIL fs check: %s: %s is there\n", label, path);
+  return ok;
+}
+
+/* The file PATH holds the LENGTH bytes at BYTES (LENGTH < 256). */
+static int fs_bytes(const char *label, const char *path, const char *bytes, size_t length) {
+  char got[256];
+  FILE *file = fopen(path, "rb");
+  size_t len = file ? fread(got, 1, sizeof got, file) : 0;
+  int ok = file != NULL && length < sizeof got && len == length && memcmp(got, bytes, length) == 0;
+  if (file) fclose(file);
+  if (!ok) fprintf(stderr, "FAIL fs check: %s: %s holds %zu bytes \"%.*s\"\n", label, path, len, (int)len, got);
+  return ok;
+}
+
+/* The permission bits (07777) of PATH are MODE. */
+static int fs_mode(const char *label, const char *path, mode_t mode) {
+  struct stat st;
+  int there = lstat(path, &st) == 0;
+  int ok = there && (st.st_mode & 07777) == mode;
+  if (!ok) fprintf(stderr, "FAIL fs check: %s: %s has the mode %04o, not %04o\n", label, path,
+                   there ? (unsigned)(st.st_mode & 07777) : 0u, (unsigned)mode);
+  return ok;
+}
+
+/* PATH is a link to TARGET. */
+static int fs_target(const char *label, const char *path, const char *target) {
+  char got[256];
+  ssize_t len = readlink(path, got, sizeof got);
+  int ok = len >= 0 && (size_t)len == strlen(target) && memcmp(got, target, (size_t)len) == 0;
+  if (!ok) fprintf(stderr, "FAIL fs check: %s: %s is not a link to %s\n", label, path, target);
+  return ok;
+}
+
+/* The info file PATH of the XDG form for the relative ITEM:
+   "[Trash Info]\nPath=", the cwd and "/" ITEM, percent encoded as the
+   driver does, "\nDeletionDate=", then the 19 date bytes
+   YYYY-MM-DDThh:mm:ss and "\n". */
+static int fs_trash_info(const char *label, const char *path, const char *item) {
+  static const char hex[] = "0123456789ABCDEF";
+  static const char date[] = "0000-00-00T00:00:00";
+  char cwd[4096];
+  char full[4352];
+  char head[13200];
+  char got[13300];
+  FILE *file = fopen(path, "rb");
+  size_t len = file ? fread(got, 1, sizeof got, file) : 0;
+  int size = getcwd(cwd, sizeof cwd) == NULL ? -1 : snprintf(full, sizeof full, "%s/%s", cwd, item);
+  size_t at = (size_t)snprintf(head, sizeof head, "[Trash Info]\nPath=");
+  int ok = file != NULL && size > 0 && (size_t)size < sizeof full;
+  for (size_t i = 0; ok && full[i] != '\0'; i++) {
+    unsigned char c = (unsigned char)full[i];
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || strchr("-._~/", c) != NULL) {
+      head[at++] = (char)c;
+      continue;
+    }
+    head[at++] = '%';
+    head[at++] = hex[c >> 4];
+    head[at++] = hex[c & 15u];
+  }
+  if (ok) at += (size_t)snprintf(head + at, sizeof head - at, "\nDeletionDate=");
+  ok = ok && len == at + sizeof date && memcmp(got, head, at) == 0 && got[at + sizeof date - 1u] == '\n';
+  for (size_t i = 0; ok && i + 1u < sizeof date; i++)
+    ok = date[i] == '0' ? got[at + i] >= '0' && got[at + i] <= '9' : got[at + i] == date[i];
+  if (file) fclose(file);
+  if (!ok) fprintf(stderr, "FAIL fs check: %s: %s holds %zu bytes \"%.*s\"\n", label, path, len, (int)len, got);
+  return ok;
+}
+
+/* The root of a write row: each row makes its own tree under build/fs/pr/
+   (the read rows reset build/fs/pr/). */
+#define FS_W(row) "build/fs/pr/" row
+#define FS_COUNT(items) (sizeof items / sizeof items[0])
+
+static const FsItem fs_one_dir[] = {{"d", FS_DIR, NULL, 0, NULL, 0}};
+static const FsItem fs_one_file[] = {{"f", FS_FILE, FS_BYTES("x"), NULL, 0}};
+static const FsItem fs_a_txt[] = {{"a.txt", FS_FILE, FS_BYTES("alpha"), NULL, 0}};
+static const FsItem fs_two_files[] = {
+  {"a.txt", FS_FILE, FS_BYTES("alpha"), NULL, 0},
+  {"b.txt", FS_FILE, FS_BYTES("beta"), NULL, 0},
+};
+static const FsItem fs_dir_file[] = {
+  {"d", FS_DIR, NULL, 0, NULL, 0},
+  {"d/f.txt", FS_FILE, FS_BYTES("data"), NULL, 0},
+};
+static const FsItem fs_exdev_items[] = {
+  {"d", FS_DIR, NULL, 0, NULL, 0},
+  {"d/f.txt", FS_FILE, FS_BYTES("data"), NULL, 0640},
+  {"d/l", FS_LINK, NULL, 0, "f.txt", 0},
+};
+static const FsItem fs_mode_items[] = {{"a.sh", FS_FILE, FS_BYTES("run"), NULL, 0777}};
+static const FsItem fs_link_tree[] = {
+  {"d", FS_DIR, NULL, 0, NULL, 0},
+  {"d/f.txt", FS_FILE, FS_BYTES("data"), NULL, 0},
+  {"d/sub", FS_DIR, NULL, 0, NULL, 0},
+  {"d/sub/g.txt", FS_FILE, FS_BYTES("g"), NULL, 0},
+  {"d/l", FS_LINK, NULL, 0, "f.txt", 0},
+};
+static const FsItem fs_trash_items[] = {
+  {"a.txt", FS_FILE, FS_BYTES("alpha"), NULL, 0},
+  {"home", FS_DIR, NULL, 0, NULL, 0},
+};
+static const FsItem fs_collision_items[] = {
+  {"a.txt", FS_FILE, FS_BYTES("new"), NULL, 0},
+  {"home", FS_DIR, NULL, 0, NULL, 0},
+  {"home/.Trash", FS_DIR, NULL, 0, NULL, 0},
+  {"home/.Trash/a.txt", FS_FILE, FS_BYTES("old"), NULL, 0},
+};
+static const FsItem fs_xdg_items[] = {
+  {"a.txt", FS_FILE, FS_BYTES("alpha"), NULL, 0},
+  {"data", FS_DIR, NULL, 0, NULL, 0},
+};
+static const FsItem fs_home_items[] = {{"home", FS_DIR, NULL, 0, NULL, 0}};
+static const FsItem fs_layer_items[] = {{"src.txt", FS_FILE, FS_BYTES("s"), NULL, 0}};
+
+/* The 19 kickoff write rows and four review regressions. The labels with
+   a mutant name are the killer rows of kickoff section 4. Gives the
+   count of failed rows. */
+static int fs_write_rows(void) {
+  int failed = 0;
+  failed += !(fs_tree(FS_W("md-parents"), NULL, 0)
+    && fs_write_case("makeDir parents", "makeDir \"" FS_W("md-parents") "/a/b/c\"", "unit")
+    && fs_is("makeDir parents", FS_W("md-parents") "/a/b/c", FS_DIR));
+  failed += !(fs_tree(FS_W("md-there"), fs_one_dir, FS_COUNT(fs_one_dir))
+    && fs_write_case("makeDir there", "makeDir \"" FS_W("md-there") "/d\"", "unit")
+    && fs_is("makeDir there", FS_W("md-there") "/d", FS_DIR));
+  failed += !(fs_tree(FS_W("md-file"), fs_one_file, FS_COUNT(fs_one_file))
+    && fs_write_case("makeDir file there", "makeDir \"" FS_W("md-file") "/f\"",
+      "inl makeDir: " FS_W("md-file") "/f: File exists")
+    && fs_bytes("makeDir file there", FS_W("md-file") "/f", FS_BYTES("x")));
+  failed += !(fs_tree(FS_W("md-parent-file"), fs_one_file, FS_COUNT(fs_one_file))
+    && fs_write_case("makeDir parent file", "makeDir \"" FS_W("md-parent-file") "/f/sub\"",
+      "inl makeDir: " FS_W("md-parent-file") "/f/sub: Not a directory")
+    && fs_bytes("makeDir parent file", FS_W("md-parent-file") "/f", FS_BYTES("x")));
+  failed += !(fs_tree(FS_W("mv-file"), fs_a_txt, FS_COUNT(fs_a_txt))
+    && fs_write_case("move file", "move \"" FS_W("mv-file") "/a.txt\" \"" FS_W("mv-file") "/b.txt\"", "unit")
+    && fs_gone("move file", FS_W("mv-file") "/a.txt")
+    && fs_bytes("move file", FS_W("mv-file") "/b.txt", FS_BYTES("alpha")));
+  failed += !(fs_tree(FS_W("mv-dir"), fs_dir_file, FS_COUNT(fs_dir_file))
+    && fs_write_case("move directory", "move \"" FS_W("mv-dir") "/d\" \"" FS_W("mv-dir") "/e\"", "unit")
+    && fs_gone("move directory", FS_W("mv-dir") "/d") && fs_is("move directory", FS_W("mv-dir") "/e", FS_DIR)
+    && fs_bytes("move directory", FS_W("mv-dir") "/e/f.txt", FS_BYTES("data")));
+  failed += !(fs_tree(FS_W("mv-there"), fs_two_files, FS_COUNT(fs_two_files))
+    && fs_write_case("move destination there", "move \"" FS_W("mv-there") "/a.txt\" \"" FS_W("mv-there") "/b.txt\"",
+      "inl move: " FS_W("mv-there") "/b.txt: File exists")
+    && fs_bytes("move destination there", FS_W("mv-there") "/a.txt", FS_BYTES("alpha"))
+    && fs_bytes("move destination there", FS_W("mv-there") "/b.txt", FS_BYTES("beta")));
+  failed += !(fs_tree(FS_W("mv-missing"), NULL, 0)
+    && fs_write_case("move missing source", "move \"" FS_W("mv-missing") "/none\" \"" FS_W("mv-missing") "/b.txt\"",
+      "inl move: " FS_W("mv-missing") "/none: No such file or directory")
+    && fs_gone("move missing source", FS_W("mv-missing") "/b.txt"));
+  pr_force_exdev = 1;
+  failed += !(fs_tree(FS_W("mv-exdev"), fs_exdev_items, FS_COUNT(fs_exdev_items))
+    && fs_write_case("move EXDEV", "move \"" FS_W("mv-exdev") "/d\" \"" FS_W("mv-exdev") "/e\"", "unit")
+    && fs_gone("move EXDEV", FS_W("mv-exdev") "/d") && fs_mode("move EXDEV", FS_W("mv-exdev") "/e", 0755)
+    && fs_bytes("move EXDEV", FS_W("mv-exdev") "/e/f.txt", FS_BYTES("data"))
+    && fs_mode("move EXDEV", FS_W("mv-exdev") "/e/f.txt", 0640)
+    && fs_target("move EXDEV", FS_W("mv-exdev") "/e/l", "f.txt"));
+  pr_force_exdev = 0;
+  failed += !(fs_tree(FS_W("cp-mode"), fs_mode_items, FS_COUNT(fs_mode_items))
+    && fs_write_case("copy mode", "copy \"" FS_W("cp-mode") "/a.sh\" \"" FS_W("cp-mode") "/b.sh\"", "unit")
+    && fs_mode("copy mode", FS_W("cp-mode") "/b.sh", 0777)
+    && fs_bytes("copy mode", FS_W("cp-mode") "/b.sh", FS_BYTES("run"))
+    && fs_bytes("copy mode", FS_W("cp-mode") "/a.sh", FS_BYTES("run")));
+  failed += !(fs_tree(FS_W("cp-tree"), fs_link_tree, FS_COUNT(fs_link_tree))
+    && fs_write_case("copy tree link", "copy \"" FS_W("cp-tree") "/d\" \"" FS_W("cp-tree") "/e\"", "unit")
+    && fs_bytes("copy tree link", FS_W("cp-tree") "/e/f.txt", FS_BYTES("data"))
+    && fs_is("copy tree link", FS_W("cp-tree") "/e/sub", FS_DIR)
+    && fs_bytes("copy tree link", FS_W("cp-tree") "/e/sub/g.txt", FS_BYTES("g"))
+    && fs_target("copy tree link", FS_W("cp-tree") "/e/l", "f.txt")
+    && fs_target("copy tree link", FS_W("cp-tree") "/d/l", "f.txt")
+    && fs_bytes("copy tree link", FS_W("cp-tree") "/d/f.txt", FS_BYTES("data")));
+  failed += !(fs_tree(FS_W("cp-there"), fs_two_files, FS_COUNT(fs_two_files))
+    && fs_write_case("copy destination there", "copy \"" FS_W("cp-there") "/a.txt\" \"" FS_W("cp-there") "/b.txt\"",
+      "inl copy: " FS_W("cp-there") "/b.txt: File exists")
+    && fs_bytes("copy destination there", FS_W("cp-there") "/a.txt", FS_BYTES("alpha"))
+    && fs_bytes("copy destination there", FS_W("cp-there") "/b.txt", FS_BYTES("beta")));
+  failed += !(fs_tree(FS_W("cp-own"), fs_dir_file, FS_COUNT(fs_dir_file))
+    && fs_write_case("copy into own tree", "copy \"" FS_W("cp-own") "/d\" \"" FS_W("cp-own") "/d/sub\"",
+      "inl copy: " FS_W("cp-own") "/d/sub: the destination is in the source tree")
+    && fs_gone("copy into own tree", FS_W("cp-own") "/d/sub"));
+  failed += !(fs_tree(FS_W("cp-missing"), NULL, 0)
+    && fs_write_case("copy missing source", "copy \"" FS_W("cp-missing") "/none\" \"" FS_W("cp-missing") "/b.txt\"",
+      "inl copy: " FS_W("cp-missing") "/none: No such file or directory")
+    && fs_gone("copy missing source", FS_W("cp-missing") "/b.txt"));
+  pr_trash_root = FS_W("tr-macos") "/home/.Trash";
+  failed += !(fs_tree(FS_W("tr-macos"), fs_trash_items, FS_COUNT(fs_trash_items))
+    && fs_write_case("trash macOS form", "trash \"" FS_W("tr-macos") "/a.txt\"", "unit")
+    && fs_gone("trash macOS form", FS_W("tr-macos") "/a.txt")
+    && fs_bytes("trash macOS form", FS_W("tr-macos") "/home/.Trash/a.txt", FS_BYTES("alpha"))
+    && fs_mode("trash macOS form", FS_W("tr-macos") "/home/.Trash", 0700));
+  pr_trash_root = FS_W("tr-collision") "/home/.Trash";
+  failed += !(fs_tree(FS_W("tr-collision"), fs_collision_items, FS_COUNT(fs_collision_items))
+    && fs_write_case("trash collision", "trash \"" FS_W("tr-collision") "/a.txt\"", "unit")
+    && fs_gone("trash collision", FS_W("tr-collision") "/a.txt")
+    && fs_bytes("trash collision", FS_W("tr-collision") "/home/.Trash/a 2.txt", FS_BYTES("new"))
+    && fs_bytes("trash collision", FS_W("tr-collision") "/home/.Trash/a.txt", FS_BYTES("old")));
+  pr_trash_root = FS_W("tr-xdg") "/data/Trash";
+  pr_trash_form = TRASH_XDG;
+  failed += !(fs_tree(FS_W("tr-xdg"), fs_xdg_items, FS_COUNT(fs_xdg_items))
+    && fs_write_case("trash XDG form", "trash \"" FS_W("tr-xdg") "/a.txt\"", "unit")
+    && fs_gone("trash XDG form", FS_W("tr-xdg") "/a.txt")
+    && fs_bytes("trash XDG form", FS_W("tr-xdg") "/data/Trash/files/a.txt", FS_BYTES("alpha"))
+    && fs_trash_info("trash XDG form", FS_W("tr-xdg") "/data/Trash/info/a.txt.trashinfo", FS_W("tr-xdg") "/a.txt"));
+  pr_trash_root = FS_W("tr-xdg-parents") "/home/.local/share/Trash";
+  failed += !(fs_tree(FS_W("tr-xdg-parents"), fs_trash_items, FS_COUNT(fs_trash_items))
+    && fs_write_case("trash XDG missing parents", "trash \"" FS_W("tr-xdg-parents") "/a.txt\"", "unit")
+    && fs_gone("trash XDG missing parents", FS_W("tr-xdg-parents") "/a.txt")
+    && fs_bytes("trash XDG missing parents", FS_W("tr-xdg-parents") "/home/.local/share/Trash/files/a.txt", FS_BYTES("alpha"))
+    && fs_trash_info("trash XDG missing parents", FS_W("tr-xdg-parents") "/home/.local/share/Trash/info/a.txt.trashinfo",
+      FS_W("tr-xdg-parents") "/a.txt"));
+  pr_trash_form = TRASH_MACOS;
+  pr_trash_root = FS_W("tr-missing") "/home/.Trash";
+  failed += !(fs_tree(FS_W("tr-missing"), fs_home_items, FS_COUNT(fs_home_items))
+    && fs_write_case("trash missing path", "trash \"" FS_W("tr-missing") "/none\"",
+      "inl trash: " FS_W("tr-missing") "/none: No such file or directory")
+    && fs_gone("trash missing path", FS_W("tr-missing") "/home/.Trash"));
+  pr_trash_root = PR_TRASH_ROOT;
+  failed += !(fs_tree(FS_W("layer"), fs_layer_items, FS_COUNT(fs_layer_items))
+    && io_driver_case("layer makeDir copy listDir",
+      "def main : IO Unit := bind (makeDir \"" FS_W("layer") "/new/sub\") (fun (a : Sum Text Unit) => bind (copy \""
+      FS_W("layer") "/src.txt\" \"" FS_W("layer") "/new/sub/dst.txt\") (fun (b : Sum Text Unit) => bind (listDir \""
+      FS_W("layer") "/new/sub\") (fun (r : Sum Text Json) => either (fun (e : Text) => write (textAppend \"inl \" e))"
+      " (fun (j : Json) => write (jsonRender j)) r)))\n",
+      "", 0, NULL, EVAL_FUEL_STEPS, "[{\"name\":\"dst.txt\",\"kind\":\"file\"}]", 0, NULL)
+    && fs_bytes("layer makeDir copy listDir", FS_W("layer") "/new/sub/dst.txt", FS_BYTES("s")));
+  {
+    int ready = fs_tree(FS_W("cp-umask"), fs_exdev_items, FS_COUNT(fs_exdev_items));
+    mode_t saved = umask(0777);
+    int copied = ready && fs_write_case("copy restrictive umask", "copy \"" FS_W("cp-umask") "/d\" \"" FS_W("cp-umask") "/e\"", "unit");
+    umask(saved);
+    failed += !(copied && fs_mode("copy restrictive umask", FS_W("cp-umask") "/e", 0755)
+      && fs_bytes("copy restrictive umask", FS_W("cp-umask") "/e/f.txt", FS_BYTES("data"))
+      && fs_mode("copy restrictive umask", FS_W("cp-umask") "/e/f.txt", 0640)
+      && fs_target("copy restrictive umask", FS_W("cp-umask") "/e/l", "f.txt"));
+    /* A failed copy can leave the new directory with its masked mode. */
+    chmod(FS_W("cp-umask") "/e", 0700);
+  }
+  {
+    int ready = fs_tree(FS_W("tr-umask"), fs_trash_items, FS_COUNT(fs_trash_items));
+    mode_t saved = umask(0777);
+    pr_trash_root = FS_W("tr-umask") "/home/.Trash";
+    int trashed = ready && fs_write_case("trash restrictive umask", "trash \"" FS_W("tr-umask") "/a.txt\"", "unit");
+    umask(saved);
+    failed += !(trashed && fs_mode("trash restrictive umask", FS_W("tr-umask") "/home/.Trash", 0700)
+      && fs_gone("trash restrictive umask", FS_W("tr-umask") "/a.txt")
+      && fs_bytes("trash restrictive umask", FS_W("tr-umask") "/home/.Trash/a.txt", FS_BYTES("alpha")));
+    chmod(FS_W("tr-umask") "/home/.Trash", 0700);
+    pr_trash_root = PR_TRASH_ROOT;
+  }
+  {
+    int ready = fs_tree(FS_W("tr-xdg-umask"), fs_trash_items, FS_COUNT(fs_trash_items));
+    mode_t saved = umask(0777);
+    pr_trash_root = FS_W("tr-xdg-umask") "/home/.local/share/Trash";
+    pr_trash_form = TRASH_XDG;
+    int trashed = ready && fs_write_case("trash XDG restrictive umask", "trash \"" FS_W("tr-xdg-umask") "/a.txt\"", "unit");
+    umask(saved);
+    failed += !(trashed && fs_mode("trash XDG restrictive umask", FS_W("tr-xdg-umask") "/home/.local/share/Trash", 0700)
+      && fs_mode("trash XDG restrictive umask", FS_W("tr-xdg-umask") "/home/.local/share/Trash/files", 0700)
+      && fs_mode("trash XDG restrictive umask", FS_W("tr-xdg-umask") "/home/.local/share/Trash/info", 0700)
+      && fs_mode("trash XDG restrictive umask", FS_W("tr-xdg-umask") "/home/.local/share/Trash/info/a.txt.trashinfo", 0600)
+      && fs_gone("trash XDG restrictive umask", FS_W("tr-xdg-umask") "/a.txt")
+      && fs_bytes("trash XDG restrictive umask", FS_W("tr-xdg-umask") "/home/.local/share/Trash/files/a.txt", FS_BYTES("alpha"))
+      && fs_trash_info("trash XDG restrictive umask", FS_W("tr-xdg-umask") "/home/.local/share/Trash/info/a.txt.trashinfo",
+        FS_W("tr-xdg-umask") "/a.txt"));
+    pr_trash_root = PR_TRASH_ROOT;
+    pr_trash_form = TRASH_MACOS;
+  }
   return failed;
 }
 
@@ -1508,6 +1836,7 @@ int main(void) {
       "def main : IO Unit := bind (write \"a\") (fun (u : Unit) => write \"b\")\n", "", 0, NULL, EVAL_FUEL_STEPS, "ab", 0, NULL);
     failed += !io_loop_rounds();
     failed += fs_read_rows();
+    failed += fs_write_rows();
   }
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;
