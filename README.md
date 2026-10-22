@@ -72,3 +72,46 @@ path:  `trash` moves it.
 - `docs/STATUS.md` and `docs/VALIDATION.md`: the status and the gate results.
 - `docs/host/README.md`: how to build and test the host kit, and how to
   replace the sample domain in `domain/`.
+
+## Examples
+
+S8 adds 2 example programs. Each is one file with no import.
+
+- `examples/organize.lang` is a file organizer. `organize DIR` writes a
+  plan: one line `NAME -> FOLDER/NAME` for each file at the top level
+  of DIR (not a directory, not a link, not a name that starts with a
+  dot). FOLDER is the text after the last dot of NAME, with ASCII A to Z
+  converted to lower case, or `other` when NAME has no dot at index 1 or
+  later or ends with a dot (for example, `trail.`).
+  `organize DIR --apply` moves each file to its folder and writes its
+  line with `: ok` or with the error text. Then it writes the paths
+  under DIR as one JSON line. `--apply` must be the last argument, after
+  DIR.
+- `examples/chat.lang` is a chat loop with a local Ollama model.
+  `chat MODEL` (with no argument, `llama3.2`) reads lines from the
+  standard input. For each line, it sends one `/api/chat` call
+  (`"stream": false`) with all the messages of its `Log`, and writes the
+  reply. At a failed call, it writes the error text, and the line does
+  not go into the `Log`. At the end of the input, it writes the
+  transcript (the `Log`) as one JSON array line.
+
+Build and run (from the root of the repository):
+
+    make build/langc
+    build/langc build examples/organize.lang -o build/organize
+    build/organize DIR
+    build/organize DIR --apply
+    build/langc build examples/chat.lang -o build/chat
+    printf 'hi\n' | build/chat MODEL
+
+The live chat needs a running Ollama and the model (for example
+`ollama pull llama3.2`). The chat connects to the address in
+`OLLAMA_HOST` (for example `127.0.0.1:11434`). When `OLLAMA_HOST` is not
+set, it connects to `127.0.0.1:11434`.
+
+## Status
+
+The plan (`docs/PLAN.md`) is CLOSED. The slices S1 to S8 are done. Each
+slice ends with `make check` GREEN and a mutant run. `docs/STATUS.md`,
+section `## Plan close`, gives the counts of S1 to S8, the mutant totals
+and the open items.

@@ -399,11 +399,26 @@ document of the instances; it becomes `langc json` and stays as a test aid
 | S6a | The filesystem read operations 2, 4, 6, 8 and 10 (`listDir`, `find`, `readFile`, `search`, `diskUsage`), tested in `build/fs/`.  Chunk A: the layer and the check refusals.  Chunk B: the driver and the path regressions.  Chunk C: the examples, the terminal rows, the mutants and the docs.  DONE 2026-10-21: rulings Q1 to Q16 = (a);  gate examples 33, evals 172, json 33, path regressions 239, terminal 17;  7 of 7 mutants killed (M1 to M7);  `docs/STATUS.md`, section S6a. |
 | S6b | The filesystem write operations 3, 5, 7 and 9 (`makeDir`, `move`, `copy`, `trash`), tested in `build/fs/`, with the chunks A, B and C of S6a.  DONE 2026-10-21: gate examples 33, check 86, evals 179, json 33, path regressions 262, terminal environment 4, terminal 21;  5 of 5 driver mutants killed (M9 to M13;  M8 killed in chunk A);  the live macOS trash:  the USER probe outside the sandbox passed on 2026-10-21 (`unit`, rc 0, the file in ~/.Trash);  `docs/STATUS.md`, section S6b.  S6 CLOSED 2026-10-21:  13 of 13 mutants killed (M1 to M13);  `docs/STATUS.md`, section S6 close. |
 | S7 | `ollama`, tested against a mock server in C that TinyCC builds, and a live probe when a local Ollama runs.  Chunk A: the layer and the check refusals.  Chunk B: the driver, the mock and the path regressions.  Chunk C: the example, the terminal rows, the mutants and the docs.  DONE 2026-10-22: rulings Q1 to Q18 = (a);  gate examples 34, check 88, evals 184, json 34, path regressions 300, terminal environment 6, terminal 25;  10 of 10 mutants killed (M1 to M10;  M4 against the live Ollama, USER ruling);  the live Ollama:  the USER probe outside the sandbox passed on 2026-10-22 (llama3.2:  generate, stream and chat each give an array, the last object `"done":true`, rc 0);  `docs/STATUS.md`, section S7.  S7 CLOSED 2026-10-22:  10 of 10 mutants killed (M1 to M10);  `docs/STATUS.md`, section S7, the close line. |
-| S8 | Examples (a chat loop that keeps a `Log` transcript, a file organizer), mutants, docs. |
+| S8 | Examples (a chat loop that keeps a `Log` transcript, a file organizer), mutants, docs.  Chunk A: the organizer and the example rows.  Chunk B: the chat example and the chat rows.  Chunk C: the mutants and the docs.  DONE 2026-10-22: rulings Q1 to Q15 = (a);  gate examples 36, check 88, evals 200, json 36, path regressions 301, terminal environment 9, terminal 31;  10 of 10 mutants killed (M1 to M10);  the live chat:  the USER probe agent-lang-work/S8-chat-probe.sh (outside the sandbox) is open;  `docs/STATUS.md`, section S8.  The plan CLOSED 2026-10-22 (Q15 (a)):  `docs/STATUS.md`, section Plan close. |
 
 Each slice ends with `make check` GREEN, guest test files for each new
 rule and refusal, and a mutant table (each mutant killed or recorded).
 Each slice after S0 is a USER commit.
+
+The plan end (S8 Q15 (a)):  S8 is the last row, and the plan is CLOSED
+on 2026-10-22.  `docs/STATUS.md`, section `## Plan close`, gives the
+counts of S1 to S8 and the mutant totals (96 of 96 killed).  The open
+items at the close:
+
+- O22 stays (b):  one arena for the whole run (section 9).  The chat
+  request grows as the square of the rounds.
+- The test mock reads at most 65535 bytes of a request (STATUS, S8
+  chunk B, D2).
+- No peak RSS measure in the sandbox (STATUS, S8 chunk B, D3).
+- The S6 items with no test (STATUS, `## S6 close`, the open items).
+- The USER live chat probe (Q14 (a)):  agent-lang-work/S8-chat-probe.sh
+  runs after the USER commit.  A close session records its result in
+  STATUS `## Plan close`.
 
 ## 9. Open items
 

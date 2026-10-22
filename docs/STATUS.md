@@ -2108,3 +2108,94 @@ to `reply 1629`), 185 lines `Connection reset by peer` (rounds 816 to
 - D5:  for chunk C, the M8 to M10 texts are unique in
   examples/chat.lang:  `rest (jlCons e t)` (snocList), `inr (logAppend
   lu` (answer, leg inr) and `inr l)` (answer, leg inl).
+
+### Chunk C:  the mutants and the docs
+
+Hand build on 2b2c0a9 (the USER commit of S8 chunk B, tree 5581e2c5),
+from the S8 kickoff (agent-lang-work/S8-kickoff.md, outside the repo).
+RULINGS Q1 to Q15 = a.  The base `make -B check` is GREEN at the chunk B
+counts.
+
+Mutants (agent-lang-work/S8-C-mutants.sh, outside the repo, one zsh
+runner;  the output is agent-lang-work/S8-C-mutants-run1.txt).  For each
+mutant:  an `sd -F` edit of a text that occurs 1 time, a `git diff`
+check, `make -B check`, then `git checkout` of the file.  Each rc is the
+exit of make (2).  After the run, `git status --short` is empty and
+`make -B check` is GREEN at the chunk B counts.
+
+| Id | Site and edit | Killer (the first FAIL line) | Other FAIL lines | rc | Result |
+|---|---|---|---|---|---|
+| M1 | organize.lang lastDot:  `pair 1 noNat` to `pair 0 noNat` | gate.sh `FAIL eval organize dotFolder` (`"bashrc"`) | json organize | 2 | KILLED |
+| M2 | organize.lang lastDot:  `(some (first acc))` to `(option (some (first acc)) (fun (k : Nat) => some k) (second acc))` | gate.sh `FAIL eval organize gzFolder` (`"tar.gz"`) | json organize | 2 | KILLED |
+| M3 | organize.lang lowerTable:  `(pair "T" "t")` to `(pair "U" "u")` (D1) | gate.sh `FAIL eval organize upperFolder` (`"TxT"`) | capsFolder, samplePlan, json organize | 2 | KILLED |
+| M4 | organize.lang item:  `"file"` to `"link"` | terminal organize-apply (D2) | organize-collide, organize-empty-arg, organize-plan | 2 | KILLED |
+| M5 | organize.lang fileItem:  `n 0 1) "."` to `n 0 1) "#"` | terminal organize-apply (D2) | organize-collide, organize-plan | 2 | KILLED |
+| M6 | organize.lang moveOne:  `join (join d f) n` to `join d f` | terminal organize-apply | organize-collide | 2 | KILLED |
+| M7 | organize.lang main:  `(applyArgs a)` to `false` | terminal organize-apply | organize-collide | 2 | KILLED |
+| M8 | chat.lang snocList:  `rest (jlCons e t)` to `jlCons e (rest t)` | gate.sh `FAIL eval chat demoTranscript` | demoRequest, threeOrder, json chat | 2 | KILLED |
+| M9 | chat.lang answer, leg inr:  `inr (logAppend lu` to `inr (logAppend l` | terminal ollama-chat-loop | none | 2 | KILLED |
+| M10 | chat.lang answer, leg inl:  `inr l)` to `inr lu)` | terminal ollama-chat-down | none | 2 | KILLED |
+
+10 of 10 mutants KILLED.  Each mutant dies at the part of its named
+killer (gate.sh or terminal).  No mutant stops at an earlier part.
+
+- D1:  M3:  a delete of `(cons (pair "T" "t") ` leaves one `)` too many
+  at the end of lowerTable.  The runner replaces the pair with a second
+  `U` pair:  the table has no `T` pair, and the parentheses stay
+  balanced.
+- D2:  terminal sorts the rows by name, thus organize-apply is the first
+  FAIL line of M4 and M5.  The named row organize-plan also fails for
+  both.
+- Docs:  README (`## Examples`:  the 2 examples, the build and run
+  commands, the live chat and OLLAMA_HOST;  `## Status`), docs/PLAN.md
+  (the row S8 and the plan end in section 8), this record and
+  `## Plan close`.
+- The USER live chat probe (Q14 (a)):  agent-lang-work/S8-chat-probe.sh,
+  outside the repo.  It runs `ollama list`, builds langc and
+  examples/chat.lang, and gives 2 input lines (the model is the first
+  argument, else llama3.2).  A pass:  2 replies, a transcript of 4
+  entries, rc 0.  Not run in this chunk (it uses the live Ollama at
+  127.0.0.1:11434).
+- No change:  src/, domain/, test/, examples/.
+
+Gate:  `make -B check` GREEN:  examples 36, parse refusals 14, check
+refusals 88, evals 200, json 36, json refusals 4, `gate: 0 failures`,
+regressions 6, printer regressions 2, path regressions 301, terminal
+environment 9, terminal 31.  `make -B check-clang` rc 0.  The dash sweep
+and `git diff --check` are clean.
+
+## Plan close (2026-10-22)
+
+The plan (docs/PLAN.md) is CLOSED (S8 Q15 (a)):  S8 is the last row.
+The counts at the end of each slice (from the slice records above;
+`none`:  the suite is not there yet):
+
+| Slice | examples | check refusals | evals | json | path regressions | terminal environment | terminal | Mutants |
+|---|---|---|---|---|---|---|---|---|
+| S1 | 20 | 60 | 48 | 20 | 67 | none | none | 9:  8 killed, M7 lived (S2 case 110 kills it) |
+| S2 | 23 | 67 | 61 | 23 | 111 | none | none | 13:  12 killed in the run, N4 killed by case 111 |
+| S3 | 28 | 72 | 127 | 28 | 147 | none | none | 15:  run 2 killed 15 |
+| S4 | 31 | 78 | 151 | 31 | 173 | none | none | 13 killed |
+| S5 | 32 | 81 | 163 | 32 | 206 | none | 12 | 13 killed |
+| S6 (S6a, S6b) | 33 | 86 | 179 | 33 | 262 | 4 | 21 | 13 killed |
+| S7 | 34 | 88 | 184 | 34 | 300 | 6 | 25 | 10 killed |
+| S8 | 36 | 88 | 200 | 36 | 301 | 9 | 31 | 10 killed |
+
+The mutant totals:  96 mutants in S1 to S8, 96 killed at the plan end
+(the S1 survivor M7 and the S2 survivor N4 are killed by later tests).
+
+Open items:
+
+- O22 stays (b):  one arena for the whole run (PLAN section 9, S5 Q6
+  (a)).  A long run can stop at the arena limit (OOM, exit 1).  The
+  chat request grows as the square of the rounds;  1000 rounds against
+  the mock give rc 0 (S8 chunk B, Q13).
+- The test mock reads at most 65535 bytes of a request (S8 chunk B D2):
+  from round 816 of the Q13 measure, a call gives `Connection reset by
+  peer`.  This is a limit of the test mock, not of the driver.
+- No peak RSS measure in the sandbox (S8 chunk B D3):  `ps` gives no row
+  and `/usr/bin/time -l` gives no RSS line.
+- The S6 items with no test (`## S6 close`, the open items:  S6b chunk B
+  D1, D3, D4 and D5, and S6b chunk C D4, no Linux goldens).
+- The USER live chat probe (S8 Q14 (a)):  agent-lang-work/S8-chat-probe.sh
+  runs after the USER commit.  A close session records its result here.
