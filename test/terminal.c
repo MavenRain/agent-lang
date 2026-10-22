@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -301,6 +302,9 @@ int main(void) {
   char path[PATH_BYTES];
   char *clean[] = {"/bin/rm", "-rf", "build/term", NULL};
   char *clean_fs[] = {"/bin/rm", "-rf", "build/fs/term", NULL};
+  /* A write to a closed socket or pipe gives EPIPE, not the signal (S7
+     Q17 (a)). */
+  signal(SIGPIPE, SIG_IGN);
   int count;
   int failed = 0;
   int i;

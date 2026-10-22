@@ -47,7 +47,7 @@ build/terminal: test/terminal.c
 build/terminal-env: test/terminal-env.c test/terminal.c
 	$(TCC) $(CFLAGS) -o $@ test/terminal-env.c
 
-check-clang: build/domain.c
+check-clang: build/domain.c test/mock-ollama.c
 	$(CC) $(CLANG_FLAGS) $(TCC_FLAGS) $(SRC) src/runtime/rt_main.c test/path-regressions.c test/terminal.c test/terminal-env.c build/domain.c
 
 check: build/langc build/path-regressions build/terminal build/terminal-env check-clang

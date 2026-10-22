@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -452,6 +453,149 @@ static int ollama_response_rows(void) {
   memcpy(detail, "500: ", 5u);
   memset(detail + 5u, 'x', 512u);
   failed += !ollama_response_case("ollama raw error limit", response, 622u, 1, detail, 517u);
+  return failed;
+}
+
+/* The endpoint rows (kickoff row S7 B): ollama_endpoint with no connect. */
+static const struct {
+  const char *label;
+  const char *text;
+  const char *host;
+  unsigned port;
+  int v6;
+  const char *error;
+} ollama_ends[] = {
+  {"the default", NULL, "127.0.0.1", 11434u, 0, NULL},
+  {"HOST", "localhost", "localhost", 11434u, 0, NULL},
+  {"HOST:PORT", "localhost:8080", "localhost", 8080u, 0, NULL},
+  {"http://", "http://127.0.0.1:9", "127.0.0.1", 9u, 0, NULL},
+  {"[::1]:PORT", "[::1]:8080", "::1", 8080u, 1, NULL},
+  {"[::1]", "[::1]", "::1", 11434u, 1, NULL},
+  {"empty", "", "127.0.0.1", 11434u, 0, NULL},
+  {"https:// refused", "https://h:1", NULL, 0u, 0, "https is not supported"},
+  {"a path refused", "h:1/api", NULL, 0u, 0, "a path is not supported"},
+};
+
+static int ollama_end_case(size_t i) {
+  OllamaEndpoint ep;
+  const char *error;
+  int ok;
+  cases_run++;
+  memset(&ep, 0, sizeof ep);
+  error = ollama_endpoint(ollama_ends[i].text, &ep);
+  ok = ollama_ends[i].error != NULL ? error != NULL && strcmp(error, ollama_ends[i].error) == 0
+    : error == NULL && strcmp(ep.host, ollama_ends[i].host) == 0 && ep.port == ollama_ends[i].port
+      && ep.v6 == ollama_ends[i].v6;
+  if (!ok)
+    fprintf(stderr, "FAIL ollama endpoint: %s: %s, host \"%s\" port %u v6 %d\n", ollama_ends[i].label,
+            error != NULL ? error : "no error", ep.host, ep.port, ep.v6);
+  return ok;
+}
+
+/* One ollama row (an fs row): ollama PATH with the body
+   {"model":"m","prompt":"hi"} gives OUT. */
+static int ollama_case(const char *label, const char *path, const char *out) {
+  char call[256];
+  int len = snprintf(call, sizeof call,
+    "ollama \"%s\" (jobj (jfCons \"model\" (jstr \"m\") (jfCons \"prompt\" (jstr \"hi\") jfNil)))", path);
+  if (len < 0 || (size_t)len >= sizeof call) {
+    cases_run++;
+    fprintf(stderr, "FAIL ollama row: %s: the call is too long\n", label);
+    return 0;
+  }
+  return fs_case(label, call, 0, out);
+}
+
+/* An ollama row that gives inl: the URL (pr_ollama_host and PATH), then
+   DETAIL (S7 Q18 (a)). */
+static int ollama_fail(const char *label, const char *path, const char *detail) {
+  char out[512];
+  snprintf(out, sizeof out, "inl ollama: http://%s%s: %s", pr_ollama_host, path, detail);
+  return ollama_case(label, path, out);
+}
+
+/* The output of /mock/many: the 1000 objects in one jarr. NULL at OOM. */
+static char *ollama_many_out(void) {
+  char *out = malloc(32768u);
+  size_t at = 1;
+  int i = 0;
+  if (out == NULL) return NULL;
+  out[0] = '[';
+  while (i < 1000) {
+    at += (size_t)snprintf(out + at, 32768u - at, "%s{\"i\":%d,\"done\":false}", i == 0 ? "" : ",", i);
+    i++;
+  }
+  snprintf(out + at, 32768u - at, "]");
+  return out;
+}
+
+/* The S7 chunk B rows (kickoff row S7 B, 28 rows): the endpoint parse, the
+   bad paths and a refused connect with no mock, then the 16 scripts of
+   one mock child. A bind or fork failure is one failed case. */
+static int ollama_rows(void) {
+  char host[32];
+  char numbers[160];
+  char *many;
+  unsigned port = 0;
+  pid_t child = -1;
+  int failed = 0;
+  int fd;
+  size_t i = 0;
+  while (i < sizeof ollama_ends / sizeof ollama_ends[0]) {
+    failed += !ollama_end_case(i);
+    i++;
+  }
+  /* No row may connect to the default port 11434 (kickoff section 5). */
+  pr_ollama_host = "127.0.0.1:1";
+  failed += !ollama_case("ollama path no slash", "api/generate",
+    "inl ollama: api/generate: the path does not start with /");
+  failed += !ollama_case("ollama path space", "/a b", "inl ollama: /a b: the path holds a space or a control byte");
+  failed += !ollama_fail("ollama connect refused", "/api/chat", "Connection refused");
+  pr_ollama_host = NULL;
+  fd = mock_listen(&port);
+  if (fd >= 0) {
+    fflush(NULL);
+    child = fork();
+  }
+  if (child == 0) {
+    mock_serve(fd, port);
+    _exit(0);
+  }
+  if (child < 0) {
+    cases_run++;
+    fprintf(stderr, "FAIL ollama mock: %s\n", strerror(errno));
+    if (fd >= 0) close(fd);
+    return failed + 1;
+  }
+  close(fd);
+  snprintf(host, sizeof host, "127.0.0.1:%u", port);
+  snprintf(numbers, sizeof numbers, "[%s]", MOCK_NUMBERS_BODY);
+  pr_ollama_host = host;
+  failed += !ollama_case("ollama one", "/mock/one", "[{\"model\":\"m\",\"response\":\"hi\",\"done\":true}]");
+  failed += !ollama_case("ollama stream", "/mock/stream",
+    "[{\"response\":\"a\",\"done\":false},{\"response\":\"b\",\"done\":false},{\"response\":\"\",\"done\":true}]");
+  failed += !ollama_case("ollama length", "/mock/length", "[{\"n\":1},{\"n\":2}]");
+  failed += !ollama_case("ollama close", "/mock/close", "[{\"n\":1},{\"n\":2}]");
+  failed += !ollama_case("ollama echo", "/mock/echo", "[{\"model\":\"m\",\"prompt\":\"hi\"}]");
+  failed += !ollama_fail("ollama 404", "/mock/404", "404: model 'x' not found");
+  failed += !ollama_fail("ollama 500", "/mock/500", "500: boom");
+  failed += !ollama_case("ollama midstream", "/mock/midstream",
+    "[{\"response\":\"a\",\"done\":false},{\"error\":\"out of memory\"}]");
+  failed += !ollama_fail("ollama bad", "/mock/bad", "line 2: byte 5: expected a value");
+  failed += !ollama_fail("ollama cut", "/mock/cut", "the stream ends before its end");
+  failed += !ollama_fail("ollama short", "/mock/short", "the stream ends before its end");
+  failed += !ollama_fail("ollama lf", "/mock/lf", "the headers do not end with CRLF CRLF");
+  pr_ollama_timeout_ms = 300u;
+  failed += !ollama_fail("ollama slow", "/mock/slow", "the read timed out");
+  pr_ollama_timeout_ms = 0;
+  failed += !ollama_case("ollama numbers", "/mock/numbers", numbers);
+  failed += !ollama_case("ollama empty", "/mock/empty", "[]");
+  many = ollama_many_out();
+  failed += !ollama_case("ollama many", "/mock/many", many != NULL ? many : "no memory");
+  free(many);
+  pr_ollama_host = NULL;
+  kill(child, SIGTERM);
+  waitpid(child, NULL, 0);
   return failed;
 }
 
@@ -1918,6 +2062,7 @@ int main(void) {
     failed += fs_read_rows();
     failed += fs_write_rows();
     failed += ollama_response_rows();
+    failed += ollama_rows();
   }
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;

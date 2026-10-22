@@ -1786,7 +1786,7 @@ restored with `git checkout -- domain/domain.lang` (`git diff --quiet`
 gives 0). `make -B check` after the restore is GREEN. M3 to M10 run in
 S7 chunk C (driver mutants).
 
-### Chunk B:  driver and path regressions (PARTIAL, part 1 of 2)
+### Chunk B:  driver and path regressions
 
 Part 1 adds the driver of `ollama` (S7 Q2 to Q11, Q15 and Q18 (a)).
 The mock server, the path regressions, the Makefile edit and the
@@ -1839,3 +1839,49 @@ remaining chunk B part 2 work above is still pending.
 Validation in one isolated copy: `make check` and `make check-clang` rc 0;
 path regressions 272, terminal environment 4, terminal 21, all with zero
 failures. No existing assertion or check was removed or relaxed.
+
+#### Part 2:  the mock server and the rows
+
+Part 2 adds the scripted mock to test/mock-ollama.c (`mock_listen`,
+`mock_serve`, `mock_answer` and the helpers `mock_put`, `mock_sized`,
+`mock_chunk`), next to the review mock of the USER commit 2fcb862
+(`MockOllama`). One forked child serves the 16 scripts. It stops at
+SIGTERM or at an accept timeout of 30 s. path-regressions.c adds
+`ollama_rows` (28 rows) after `ollama_response_rows`. terminal.c ignores
+SIGPIPE at the start of main (Q17). The check-clang rule of the Makefile
+has test/mock-ollama.c as a prerequisite.
+
+| Runner | Part 1 | Part 2 |
+|---|---|---|
+| path regressions | 272 | 300 |
+| terminal environment | 4 | 4 |
+| terminal | 21 | 21 |
+
+The rows:
+
+- Endpoint 9 (`ollama_endpoint`, no connect, `FAIL ollama endpoint: LABEL`):  the default, HOST, HOST:PORT, `http://`, `[::1]:PORT`, `[::1]`, empty, `https://` refused, a path refused.
+- Bad path 2:  `ollama path no slash` (`api/generate`) and `ollama path space` (`/a b`).
+- Connect refused 1:  `ollama connect refused` gives `inl ollama: http://127.0.0.1:1/api/chat: Connection refused`.
+- Mock 16:  `ollama one`, `ollama stream`, `ollama length`, `ollama close`, `ollama echo`, `ollama 404`, `ollama 500`, `ollama midstream`, `ollama bad`, `ollama cut`, `ollama short`, `ollama lf`, `ollama slow` (timeout 300 ms), `ollama numbers`, `ollama empty`, `ollama many` (1000 objects).
+
+Gate:  `make -B check` GREEN (path regressions 300, terminal environment
+4, terminal 21, 0 failed). `make -B check-clang` rc 0. The dash sweep and
+`git diff --check` are clean. Smoke:  2 probe edits (each ollama row
+expects `probe`;  each endpoint row inverts its result) give 28 FAIL lines
+with the row labels. The restore gives 300 checked, 0 failed. Part 2 runs
+no mutants (M3 to M10 run in chunk C).
+
+| Id | Deviation or record |
+|---|---|
+| D4 | The USER commit 2fcb862 holds the B1 tree and a review:  the mock `MockOllama` (one child for each response), 10 rows (262 to 272), `signal (SIGPIPE, SIG_IGN)` in path-regressions.c and 3 driver.c corrections. USER ruling (2026-10-21):  keep the two mocks in test/mock-ollama.c. Thus path regressions is 300, not 290. |
+| D5 | Q17 (a) names `sigaction`. rt_main.c (part 1) and path-regressions.c (the review) use `signal`. terminal.c also uses `signal` (one form). |
+| D6 | The jsonParse text of the `/mock/bad` line `{"n":}`:  `line 2: byte 5: expected a value` (byte 5 is the `}`). |
+| D7 | The bad path rows and the connect refused row use the host 127.0.0.1:1, thus no row can connect to the default port 11434. |
+
+Part 2 review: `/mock/echo` now checks the HTTP/1.1 request line and
+Content-Length against the received body, as well as Host, Content-Type
+and Connection. Before the fix, a driver mutation to HTTP/1.0 passed all
+300 path regressions. The fixed mock rejects that mutation in
+`ollama echo` (300 checked, 1 failed). A C socket-pair probe rejects zero, missing,
+short, long and malformed Content-Length values, and accepts the correct
+length. The production driver was restored before the final gate.
