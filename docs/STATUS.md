@@ -2197,5 +2197,21 @@ Open items:
   and `/usr/bin/time -l` gives no RSS line.
 - The S6 items with no test (`## S6 close`, the open items:  S6b chunk B
   D1, D3, D4 and D5, and S6b chunk C D4, no Linux goldens).
-- The USER live chat probe (S8 Q14 (a)):  agent-lang-work/S8-chat-probe.sh
-  runs after the USER commit.  A close session records its result here.
+- The USER live chat probe (S8 Q14 (a)):  DONE 2026-10-22, a PASS (the
+  close line below).
+
+S8 CLOSED 2026-10-22:  the USER live chat probe
+(agent-lang-work/S8-chat-probe.sh, outside the sandbox, at the default
+endpoint 127.0.0.1:11434, OLLAMA_HOST not set) is a PASS.  The model is
+llama3.2 (`ollama list` showed `llama3.2:latest`, a80c4f17acd5, 2.0 GB).
+The probe built langc and examples/chat.lang, then gave the chat 2 input
+lines.  The input `Say hello in one short line.` gave the reply
+`Hello!`.  The input `Now say goodbye in one short line.` gave the reply
+`Goodbye.`.  The last output line is the transcript:  a JSON array of 4
+entries (user, assistant, user, assistant).  The user contents are the 2
+input lines, and the assistant contents are the 2 replies.  The stderr
+is empty, and the chat rc is 0.  The probe line:
+`PASS rc 0 (2 replies, a transcript of 4 entries, model llama3.2)`.
+10 of 10 S8 mutants are killed (M1 to M10, chunk C).  The close changes
+the docs only:  docs/PLAN.md (the row S8 and the plan end) and
+docs/STATUS.md (this line and the open item).
