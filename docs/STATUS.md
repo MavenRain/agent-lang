@@ -1885,3 +1885,64 @@ and Connection. Before the fix, a driver mutation to HTTP/1.0 passed all
 `ollama echo` (300 checked, 1 failed). A C socket-pair probe rejects zero, missing,
 short, long and malformed Content-Length values, and accepts the correct
 length. The production driver was restored before the final gate.
+
+### Chunk C:  examples, terminal rows, mutants and docs
+
+Chunk C is in 2 parts on the USER commit 4728d16. Part 1 adds the
+example, the terminal rows and the mock script for chat. Part 2 runs the
+mutants M1 to M10 and writes the docs and the USER live probe
+(agent-lang-work/S7-ollama-probe.sh, outside the repo).
+
+- examples/ollama.lang:  the folds itemsOf, fieldOf and textOf (the fs.lang form), boolOf, joined, content and lastDone over sample responses:  samples (a stream of 3 generate objects), chat (one object) and refused (`inl`). 4 evals:  streamText `"Hello"`, chatText `"hi there"`, streamDone `some 1`, refusedDone `none`. The golden test/json/ollama.json has 9 instances.
+- test/mock-ollama.c:  the script MOCK_CHAT at `/mock/chat` (one chat object with Content-Length). The switch stays exhaustive.
+- test/terminal.c:  `#define MOCK_SCRIPT_ONLY`, then `#include "mock-ollama.c"`, `mock_port` and `fixture_env`. The trash-home rows and the `ollama-*` rows get a copy of environ without XDG_DATA_HOME and OLLAMA_HOST, then HOME=... or OLLAMA_HOST=127.0.0.1:PORT (ollama-refused gets the port 1). main forks the mock after the fixture list (the listen comes before the fork) and does `kill` and `waitpid` before the last return. The early returns come before the fork.
+- test/term:  ollama-stream, ollama-chat, ollama-refused and ollama-404 (each `.lang`, `.code` 0 and `.out`).
+- test/terminal-env.c:  2 checks (`an ollama row gets OLLAMA_HOST=127.0.0.1:PORT`, `the parent OLLAMA_HOST is dropped`).
+- Makefile:  build/terminal and build/terminal-env have test/mock-ollama.c as a prerequisite.
+
+| Runner | B | C |
+|---|---|---|
+| examples | 33 | 34 |
+| evals | 180 | 184 |
+| json | 33 | 34 |
+| path regressions | 300 | 300 |
+| terminal environment | 4 | 6 |
+| terminal | 21 | 25 |
+
+Gate:  `make -B check` GREEN (examples 34, parse refusals 14, check
+refusals 88, evals 184, json 34, json refusals 4, regressions 6, printer
+regressions 2, path regressions 300, terminal environment 6, terminal
+25, 0 failed). `make -B check-clang` rc 0. The dash sweep and
+`git diff --check` are clean.
+
+The mutants ran with one runner script. Each mutant is an `sd -F` edit,
+then `make -B check`, then `git checkout -- domain/domain.lang
+src/runtime/driver.c` (`git diff --quiet` gives 0). The named killer is
+the first FAIL that make reaches. The review rows of
+`ollama_response_rows` run before `ollama_rows` (D5).
+
+| Id | Mutant | First killer |
+|---|---|---|
+| M1 | `ioBind` leg `inl`:  the ollamaOp arm gives `k (inl "")` in place of `k r` | gate.sh `FAIL eval io ollamaTrace` (KILLED, as named;  then `FAIL json examples/io.lang`) |
+| M2 | `ollamaPath : Nat`, `def ollama : Nat -> ...` and the 4 binders (the domain loads) | gate.sh `FAIL examples/io.lang: langc: TYPE_MISMATCH: layers: the binder type Text differs from the expected type Nat` (KILLED, as named;  25 FAIL lines, `io-ollama-nat-path.lang` among them) |
+| M3 | `layer_of` gives LAYER_LIST_DIR for ollamaOp | path regression `FAIL ollama response: ollama Content-Length: status 1, 0 bytes, expected 4` (KILLED, D5;  29 FAIL lines, the named `ollama one` among them) |
+| M4 | `ollama_call` gives `ollama_endpoint(NULL, &ep)` (the default 127.0.0.1:11434) | path regression `FAIL ollama response: ollama Content-Length: status 0, 64 bytes, expected 4` (KILLED, D5 and D6;  27 FAIL lines;  the named `ollama connect refused` gives `inl ollama: http://127.0.0.1:11434/api/chat: 404: model 'm' not found`) |
+| M5 | the chunked decode drops the last data chunk (`put = prev` at the 0 chunk) | path regression `FAIL ollama response: ollama complete final chunk: status 0, 2 bytes, expected 4` (KILLED, D5;  then `ollama complete trailer` and the named `ollama stream`:  `line 2: byte 16: expected a string key`) |
+| M6 | the NDJSON split keeps the last line only (`items[(count = 1u) - 1u]`) | path regression `FAIL IO driver: ollama stream` (KILLED, as named;  then `ollama length`, `ollama close`, `ollama midstream`, `ollama many`) |
+| M7 | the status test is `status > 999u` in place of `status > 299u` (a 4xx or 5xx status gives `inr`) | path regression `FAIL ollama response: ollama JSON error NUL: status 0, 22 bytes, expected 49` (KILLED, D5;  6 FAIL lines, the named `ollama 404` gives `[{"error":"model 'x' not found"}]`) |
+| M8 | the request `Content-Length` is one byte short (`body->nat - 1u`, 2 sites) | path regression `FAIL IO driver: ollama one: ... Connection reset by peer` (KILLED, D7;  9 FAIL lines, the named `ollama echo` among them) |
+| M9 | the header end is `\n\n` only (no CRLF CRLF) | path regression `FAIL ollama response: ollama Content-Length: status 0, 78 bytes, expected 4` (KILLED, D5;  21 FAIL lines, the named `ollama one` among them) |
+| M10 | a data chunk cut at the close gives `done = 1` in place of `return OLLAMA_CUT` | path regression `FAIL IO driver: ollama cut: status 0, 9 bytes "[{"n":1}]"` (KILLED, as named;  the only FAIL line) |
+
+10 of 10 mutants are killed. `make -B check` after the last restore is
+GREEN.
+
+| Id | Deviation or record |
+|---|---|
+| D1 | HEAD 4728d16 holds a USER mock_echo fix (the request line and Content-Length) in test/mock-ollama.c, in addition to the staged B tree 11ddc9d9. USER ruling (2026-10-21):  proceed on it. |
+| D2 | check-clang gave `-Wunused-function` for mock_ollama_start and mock_ollama_finish in terminal.c. The review mock is now in `#ifndef MOCK_SCRIPT_ONLY`, and terminal.c defines MOCK_SCRIPT_ONLY. |
+| D3 | The 404 `inl` text holds the mock port. The ollama-404 guest writes `textSlice e 0 25`, then `PORT`, then `textSlice e 30 4096` (a port of 5 digits:  the macOS and Linux ephemeral ranges start at 49152 and 32768). |
+| D4 | The Bool printer form is `1` or `0` (streamDone gives `some 1`). |
+| D5 | The 10 review rows run before `ollama_rows`. Thus a review row is the first killer of M3, M4, M5, M7 and M9. The named killer also fails for each. |
+| D6 | A live Ollama listened at 127.0.0.1:11434 (`lsof`). The session permission gate refused the connect probe. USER ruling (2026-10-22):  run M4 against the live Ollama. The M4 rows sent their requests to it:  `/api/chat` gave `404: model 'm' not found`, and the `/mock/*` paths gave `404: 404 page not found`. |
+| D7 | M8:  the first killer is `ollama one`, not the named `ollama echo`. The mock reads one byte less than the driver sends, then closes with that byte unread, thus the driver gets `Connection reset by peer`. `ollama echo` also fails. |

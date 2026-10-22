@@ -1,0 +1,5 @@
+-- Writes the ollama response of /mock/404 (S7):  inl of the status and the
+-- error text of the body. The mock port changes at each run, thus the
+-- program writes PORT in place of the 5 digits of the port (bytes 25 to 29).
+def shown : Sum Text Json -> Text := fun (r : Sum Text Json) => either (fun (e : Text) => textAppend (textSlice e 0 25) (textAppend "PORT" (textSlice e 30 4096))) (fun (j : Json) => jsonRender j) r
+def main : IO Unit := bind (ollama "/mock/404" (jobj (jfCons "model" (jstr "m") (jfCons "prompt" (jstr "hi") jfNil)))) (fun (r : Sum Text Json) => write (textAppend (shown r) "\n"))

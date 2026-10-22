@@ -41,10 +41,10 @@ build/langc: $(SRC) $(HEADERS) build/domain.c build/runtime.o
 build/path-regressions: test/path-regressions.c test/mock-ollama.c $(FRONT) $(TARGET) $(DRIVER) $(HEADERS) build/domain.c
 	$(TCC) $(CFLAGS) -o $@ test/path-regressions.c $(FRONT) $(TARGET) $(DRIVER) build/domain.c
 
-build/terminal: test/terminal.c
+build/terminal: test/terminal.c test/mock-ollama.c
 	$(TCC) $(CFLAGS) -o $@ test/terminal.c
 
-build/terminal-env: test/terminal-env.c test/terminal.c
+build/terminal-env: test/terminal-env.c test/terminal.c test/mock-ollama.c
 	$(TCC) $(CFLAGS) -o $@ test/terminal-env.c
 
 check-clang: build/domain.c test/mock-ollama.c

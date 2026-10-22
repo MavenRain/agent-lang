@@ -1,0 +1,4 @@
+-- Writes the ollama response of /mock/stream (S7):  the 3 objects of the
+-- chunked NDJSON stream as one array. OLLAMA_HOST is the mock (fixture_env).
+def shown : Sum Text Json -> Text := fun (r : Sum Text Json) => either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r
+def main : IO Unit := bind (ollama "/mock/stream" (jobj (jfCons "model" (jstr "m") (jfCons "prompt" (jstr "hi") jfNil)))) (fun (r : Sum Text Json) => write (textAppend (shown r) "\n"))

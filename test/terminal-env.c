@@ -51,6 +51,35 @@ int main(void) {
       && parent[3] == other_home, "the parent environment is unchanged");
   environ = saved_env;
 
+  /* S7: an ollama row gets the mock port, and no fixture keeps the parent
+     OLLAMA_HOST (a real Ollama can listen there). */
+  {
+    char parent_host[] = "OLLAMA_HOST=192.0.2.1:11434";
+    char *with_host[] = {parent_home, parent_keep, parent_host, NULL};
+    char *const *row;
+    char *const *refused;
+    char *const *trash;
+    int hosts = 0;
+    int good = 0;
+    int stray = 0;
+    environ = with_host;
+    mock_port = 4321u;
+    row = fixture_env("ollama-stream");
+    for (i = 0; row != NULL && row[i] != NULL; i++) {
+      hosts += strncmp(row[i], "OLLAMA_HOST=", 12) == 0;
+      good += strcmp(row[i], "OLLAMA_HOST=127.0.0.1:4321") == 0 || row[i] == parent_home || row[i] == parent_keep;
+    }
+    expect(row != NULL && hosts == 1 && good == 3, "an ollama row gets OLLAMA_HOST=127.0.0.1:PORT");
+    refused = fixture_env("ollama-refused");
+    for (i = 0; refused != NULL && refused[i] != NULL; i++)
+      stray += strncmp(refused[i], "OLLAMA_HOST=", 12) == 0 && strcmp(refused[i], "OLLAMA_HOST=127.0.0.1:1") != 0;
+    trash = fixture_env("trash-home");
+    for (i = 0; trash != NULL && trash[i] != NULL; i++) stray += strncmp(trash[i], "OLLAMA_HOST=", 12) == 0;
+    expect(refused != NULL && trash != NULL && stray == 0, "the parent OLLAMA_HOST is dropped");
+    mock_port = 0;
+    environ = saved_env;
+  }
+
   /* getcwd still fits PATH_BYTES, but adding the HOME suffix does not. */
   if ((mkdir("build", 0755) != 0 && errno != EEXIST)
       || (mkdir("build/fs", 0755) != 0 && errno != EEXIST)

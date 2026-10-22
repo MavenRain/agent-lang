@@ -10,8 +10,11 @@
    standard error. An fs row (S6a, S6b) first gets its own tree under
    build/fs/term/NAME from the table fs_items. The row trash-home runs with
    a copy of the environment that has HOME under build/fs/term/trash-home
-   (fixture_env), never the real HOME. The runner writes only under
-   build/term/ and build/fs/term/. */
+   (fixture_env), never the real HOME. An ollama row (S7) runs with a copy
+   of the environment that has OLLAMA_HOST=127.0.0.1:PORT, PORT the port of
+   the mock of test/mock-ollama.c (ollama-refused: port 1, no listener).
+   The runner forks the mock child before the rows and ends it after them.
+   The runner writes only under build/term/ and build/fs/term/. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
 #include <errno.h>
@@ -25,6 +28,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#define MOCK_SCRIPT_ONLY
+#include "mock-ollama.c"
+
 extern char **environ;
 
 #define MAX_FIXTURES 64
@@ -35,6 +41,9 @@ extern char **environ;
 #define TEXT_BYTES 65536
 
 static char names[MAX_FIXTURES][NAME_BYTES];
+
+/* The port of the mock (main sets it before the rows). */
+static unsigned mock_port = 0;
 
 /* Runs ARGV with the standard streams IN, OUT and ERR and the environment
    ENVP. Returns the exit code, or -1. */
@@ -182,27 +191,34 @@ static int fixtures(void) {
 }
 
 /* A run fixture with the exit code CODE. Returns 1 if it passes. */
-/* The environment of the run fixture NAME:  environ, but trash-home gets a
-   copy without XDG_DATA_HOME, with HOME=CWD/build/fs/term/trash-home/home
-   (kickoff section 5: no test uses the real HOME, and the runner does not
-   call setenv). Returns
+/* The environment of the run fixture NAME:  environ, but trash-home and
+   the ollama rows get a copy without XDG_DATA_HOME and OLLAMA_HOST (the
+   keys that can move a root). trash-home gets
+   HOME=CWD/build/fs/term/trash-home/home, an ollama row gets
+   OLLAMA_HOST=127.0.0.1:PORT (kickoff section 5: no test uses the real
+   HOME or a real Ollama, and the runner does not call setenv). Returns
    NULL when the copy cannot be made. */
 static char *const *fixture_env(const char *name) {
-  static char home[PATH_BYTES];
+  static char extra[PATH_BYTES];
   static char *env[MAX_ENV + 2];
   char cwd[PATH_BYTES];
   size_t n = 0;
   size_t i;
+  size_t key;
+  int trash = strcmp(name, "trash-home") == 0;
   int len;
-  if (strcmp(name, "trash-home") != 0) return environ;
-  if (getcwd(cwd, sizeof cwd) == NULL) return NULL;
-  len = snprintf(home, sizeof home, "HOME=%s/build/fs/term/trash-home/home", cwd);
-  if (len < 0 || (size_t)len >= sizeof home) return NULL;
+  if (!trash && strncmp(name, "ollama-", 7) != 0) return environ;
+  if (trash && getcwd(cwd, sizeof cwd) == NULL) return NULL;
+  len = trash ? snprintf(extra, sizeof extra, "HOME=%s/build/fs/term/trash-home/home", cwd)
+              : snprintf(extra, sizeof extra, "OLLAMA_HOST=127.0.0.1:%u", strcmp(name, "ollama-refused") == 0 ? 1u : mock_port);
+  if (len < 0 || (size_t)len >= sizeof extra) return NULL;
+  key = (size_t)(strchr(extra, '=') - extra) + 1u;
   for (i = 0; environ[i] != NULL && n < MAX_ENV; i++)
-    if (strncmp(environ[i], "HOME=", 5) != 0 && strncmp(environ[i], "XDG_DATA_HOME=", 14) != 0)
+    if (strncmp(environ[i], extra, key) != 0 && strncmp(environ[i], "XDG_DATA_HOME=", 14) != 0
+        && strncmp(environ[i], "OLLAMA_HOST=", 12) != 0)
       env[n++] = environ[i];
   if (environ[i] != NULL) return NULL;
-  env[n++] = home;
+  env[n++] = extra;
   env[n] = NULL;
   return env;
 }
@@ -308,6 +324,8 @@ int main(void) {
   int count;
   int failed = 0;
   int i;
+  int fd;
+  pid_t child = -1;
   if (run(clean, "/dev/null", "/dev/null", "/dev/null", environ) != 0 || mkdir("build/term", 0755) != 0) {
     printf("FAIL terminal: cannot make build/term\n");
     return 1;
@@ -320,6 +338,23 @@ int main(void) {
   count = fixtures();
   if (count < 0) {
     printf("FAIL terminal: cannot read test/term\n");
+    return 1;
+  }
+  /* The mock (S7 Q12 (a)):  listen before the fork, thus the port is known
+     to each ollama row. No exit path below leaves the child alive
+     (kickoff section 5). */
+  fd = mock_listen(&mock_port);
+  if (fd >= 0) {
+    fflush(NULL);
+    child = fork();
+  }
+  if (child == 0) {
+    mock_serve(fd, mock_port);
+    _exit(0);
+  }
+  if (fd >= 0) close(fd);
+  if (child < 0) {
+    printf("FAIL terminal: cannot start the ollama mock: %s\n", strerror(errno));
     return 1;
   }
   for (i = 0; i < count; i++) {
@@ -336,6 +371,8 @@ int main(void) {
       failed += !refusal_fixture(names[i], code);
     }
   }
+  kill(child, SIGTERM);
+  waitpid(child, NULL, 0);
   printf("terminal: %d checked, %d failed\n", count, failed);
   return failed != 0 || count == 0;
 }

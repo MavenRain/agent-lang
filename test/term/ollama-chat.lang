@@ -1,0 +1,4 @@
+-- Writes the ollama response of /mock/chat (S7):  one chat object at
+-- "stream": false. OLLAMA_HOST is the mock (fixture_env).
+def shown : Sum Text Json -> Text := fun (r : Sum Text Json) => either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r
+def main : IO Unit := bind (ollama "/mock/chat" (jobj (jfCons "model" (jstr "m") (jfCons "messages" (jarr (jlCons (jobj (jfCons "role" (jstr "user") (jfCons "content" (jstr "hi") jfNil))) jlNil)) (jfCons "stream" (jbool false) jfNil))))) (fun (r : Sum Text Json) => write (textAppend (shown r) "\n"))

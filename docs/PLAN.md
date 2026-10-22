@@ -320,6 +320,24 @@ disk-usage each run a console program on its own tree under
 `build/fs/term/`. The JSON shapes are in `formers/tcc-json.md`,
 `## S6 shapes`.
 
+S7 note (the S7 rulings Q1 to Q18 (a)): the operation 1 is in. It has
+one `IOF` constructor `ollamaOp` (path, body, next) and the domain def
+`ollama : Text -> Json -> IO (Sum Text Json)`. The path starts with `/`
+and holds no space or control byte (O12 (a)). The driver sends one HTTP/1.1
+POST with 4 headers and `Connection: close` to `OLLAMA_HOST` (default
+`127.0.0.1:11434`), then reads to the close (at most 64 MiB). The body
+is chunked, sized by Content-Length, or the bytes to the close. A 2xx
+status gives `inr` of a JSON array of each response object (one object
+at `"stream": false`). A failure is `inl` of `ollama: URL: TEXT`: a
+non-2xx status gives `STATUS: TEXT` with the `error` field or the raw
+body; a bad line gives `line N: byte B: TEXT`; a cut body gives `the
+stream ends before its end`. The console program has no timeout (Q9) and
+ignores SIGPIPE (Q17). `examples/ollama.lang` has closed functions over
+sample responses (4 evals). The terminal rows ollama-stream, ollama-chat,
+ollama-refused and ollama-404 run against the forked mock of
+`test/mock-ollama.c`. The shapes are in `formers/tcc-json.md`,
+`## S7 shapes`.
+
 ## 7. The console program
 
 `langc build PROG -o OUT` checks `PROG`, finds `main : IO Unit` and writes
@@ -363,7 +381,7 @@ document of the instances; it becomes `langc json` and stays as a test aid
 | S5 | `IO`, the operation signature, `langc build` with libtcc, and the terminal operations 11 to 13. DONE 2026-10-20: rulings Q1 to Q12 = (a), Q-C1 = (a); gate examples 32, evals 163, json 32, path regressions 206, terminal 12; 13 of 13 mutants killed; `docs/STATUS.md`, section S5. |
 | S6a | The filesystem read operations 2, 4, 6, 8 and 10 (`listDir`, `find`, `readFile`, `search`, `diskUsage`), tested in `build/fs/`.  Chunk A: the layer and the check refusals.  Chunk B: the driver and the path regressions.  Chunk C: the examples, the terminal rows, the mutants and the docs.  DONE 2026-10-21: rulings Q1 to Q16 = (a);  gate examples 33, evals 172, json 33, path regressions 239, terminal 17;  7 of 7 mutants killed (M1 to M7);  `docs/STATUS.md`, section S6a. |
 | S6b | The filesystem write operations 3, 5, 7 and 9 (`makeDir`, `move`, `copy`, `trash`), tested in `build/fs/`, with the chunks A, B and C of S6a.  DONE 2026-10-21: gate examples 33, check 86, evals 179, json 33, path regressions 262, terminal environment 4, terminal 21;  5 of 5 driver mutants killed (M9 to M13;  M8 killed in chunk A);  the live macOS trash:  the USER probe outside the sandbox passed on 2026-10-21 (`unit`, rc 0, the file in ~/.Trash);  `docs/STATUS.md`, section S6b.  S6 CLOSED 2026-10-21:  13 of 13 mutants killed (M1 to M13);  `docs/STATUS.md`, section S6 close. |
-| S7 | `ollama`, tested against a mock server in C that TinyCC builds, and a live probe when a local Ollama runs. |
+| S7 | `ollama`, tested against a mock server in C that TinyCC builds, and a live probe when a local Ollama runs.  Chunk A: the layer and the check refusals.  Chunk B: the driver, the mock and the path regressions.  Chunk C: the example, the terminal rows, the mutants and the docs.  DONE 2026-10-22: rulings Q1 to Q18 = (a);  gate examples 34, check 88, evals 184, json 34, path regressions 300, terminal environment 6, terminal 25;  10 of 10 mutants killed (M1 to M10;  M4 against the live Ollama, USER ruling);  the live probe is a USER step (agent-lang-work/S7-ollama-probe.sh);  `docs/STATUS.md`, section S7. |
 | S8 | Examples (a chat loop that keeps a `Log` transcript, a file organizer), mutants, docs. |
 
 Each slice ends with `make check` GREEN, guest test files for each new
@@ -400,6 +418,7 @@ Each item gives the proposal first.
   former, not a base type).
 - O12 `ollama`: (a) any endpoint path, the array of each response object;
   (b) `/api/chat` only.
+  S7 note (Q2 (a)): (a) is in with S7 (`docs/STATUS.md`, section S7).
 - O13 Overwrite: (a) `move` and `copy` refuse an existing destination, and
   `makeDir` makes the parents; (b) they replace it.
 - O14 `search`: (a) a fixed string; (b) a regular expression (POSIX

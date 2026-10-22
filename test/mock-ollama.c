@@ -5,6 +5,9 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
+/* The review mock (one child for each response). terminal.c does not use
+   it:  it defines MOCK_SCRIPT_ONLY (check-clang -Wunused-function). */
+#ifndef MOCK_SCRIPT_ONLY
 typedef struct {
   pid_t pid;
   unsigned port;
@@ -76,6 +79,8 @@ static int mock_ollama_finish(const MockOllama *server) {
   return got == server->pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+#endif
+
 /* The scripted mock (S7 Q12 (a), kickoff section 1.5): one listen socket
    at 127.0.0.1 port 0, one forked child for all rows, and one script for
    each request path. */
@@ -96,6 +101,7 @@ typedef enum {
   MOCK_NUMBERS,
   MOCK_EMPTY,
   MOCK_MANY,
+  MOCK_CHAT,
   MOCK_NONE
 } MockScript;
 
@@ -103,7 +109,7 @@ typedef enum {
 static const char *const mock_paths[] = {
   "/mock/one", "/mock/stream", "/mock/length", "/mock/close", "/mock/echo", "/mock/404", "/mock/500",
   "/mock/midstream", "/mock/bad", "/mock/cut", "/mock/short", "/mock/lf", "/mock/slow", "/mock/numbers",
-  "/mock/empty", "/mock/many",
+  "/mock/empty", "/mock/many", "/mock/chat",
 };
 
 /* /mock/numbers: an Int64, a fraction and a large integer (S7 Q11 (a)). */
@@ -272,6 +278,9 @@ static void mock_answer(int fd, unsigned port) {
       break;
     case MOCK_MANY:
       (void)mock_many(fd);
+      break;
+    case MOCK_CHAT:
+      (void)mock_json(fd, "200 OK", "{\"model\":\"m\",\"message\":{\"role\":\"assistant\",\"content\":\"hi there\"},\"done\":true}");
       break;
     case MOCK_NONE:
       (void)mock_sized(fd, "404 Not Found", "{\"error\":\"no script\"}", 21u);

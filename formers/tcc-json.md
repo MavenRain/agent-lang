@@ -156,3 +156,30 @@ payloads; readFile returns Text directly):
   `OP: the path holds a NUL byte`, without the path; a NUL byte in a
   find glob gives `find: ROOT: the glob holds a NUL byte`; an empty
   search text gives `search: ROOT: the search text is empty`.
+
+## S7 shapes: ollama responses
+
+S7 adds no instance shape. The golden `test/json/ollama.json` of
+`examples/ollama.lang` holds only closed values. At run time the driver
+gives each response as a domain value of `Sum Text Json`:
+
+- `inr` of an array of each response object, in the order of the
+  NDJSON lines. An empty line is skipped. A `"stream": false` body gives
+  one object, for example
+  `[{"model":"m","response":"hi","done":true}]`.
+- A stream gives one object for each line, for example
+  `[{"response":"a","done":false},{"response":"b","done":false},{"response":"","done":true}]`.
+- A failure is `inl` of `ollama: URL: TEXT`, with the URL
+  `http://HOST:PORT/PATH`, for example
+  `ollama: http://127.0.0.1:1/api/chat: Connection refused`.
+- A non-2xx status gives `STATUS: TEXT` with the `error` string of the
+  body, else the raw body, for example `404: model 'x' not found`.
+- A line that is not JSON gives `line N: byte B: TEXT` (the jsonParse
+  text), for example `line 2: byte 5: expected a value`.
+- A cut body gives `the stream ends before its end`. Headers without
+  CRLF CRLF give `the headers do not end with CRLF CRLF`. A timeout gives
+  `the read timed out`. A body over 64 MiB gives `the response is larger
+  than 67108864 bytes`.
+- Input validation has its own detail text: `ollama: PATH: the path does
+  not start with /`, `ollama: PATH: the path holds a space or a control
+  byte` and `ollama: OLLAMA_HOST: TEXT` for a bad OLLAMA_HOST.
