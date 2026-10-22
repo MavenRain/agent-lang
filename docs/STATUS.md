@@ -1946,3 +1946,20 @@ GREEN.
 | D5 | The 10 review rows run before `ollama_rows`. Thus a review row is the first killer of M3, M4, M5, M7 and M9. The named killer also fails for each. |
 | D6 | A live Ollama listened at 127.0.0.1:11434 (`lsof`). The session permission gate refused the connect probe. USER ruling (2026-10-22):  run M4 against the live Ollama. The M4 rows sent their requests to it:  `/api/chat` gave `404: model 'm' not found`, and the `/mock/*` paths gave `404: 404 page not found`. |
 | D7 | M8:  the first killer is `ollama one`, not the named `ollama echo`. The mock reads one byte less than the driver sends, then closes with that byte unread, thus the driver gets `Connection reset by peer`. `ollama echo` also fails. |
+
+S7 CLOSED 2026-10-22:  the USER live Ollama probe
+(agent-lang-work/S7-ollama-probe.sh, outside the sandbox, at the default
+endpoint 127.0.0.1:11434, OLLAMA_HOST not set) is a PASS. The model is
+llama3.2 (`ollama list` showed no model, thus the USER did
+`ollama pull llama3.2` first). The probe `generate` (`/api/generate`,
+`"stream": false`) gave `inr`:  an array of 1 object with the response
+`Hello! How can I assist you today?`, the last object `"done":true`,
+rc 0. The probe `stream` (`/api/generate`, a stream) gave `inr`:  an
+array of 10 objects (9 with `"done":false`), the last object
+`"done":true`, rc 0. The probe `chat` (`/api/chat`, `"stream": false`)
+gave `inr`:  an array of 1 object with the message
+`{"role":"assistant","content":"Hello! How can I assist you today?"}`,
+the last object `"done":true`, rc 0. The first call has a load_duration
+of 59 s (the model load). 10 of 10 mutants are killed (M1 to M10, chunk
+C). The close changes the docs only:  docs/PLAN.md (the row S7) and
+docs/STATUS.md (this line).
