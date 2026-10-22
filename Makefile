@@ -38,7 +38,7 @@ build/runtime.o: build/runtime.c
 build/langc: $(SRC) $(HEADERS) build/domain.c build/runtime.o
 	$(CC) $(CFLAGS) $(TCC_FLAGS) -o build/langc $(SRC) build/domain.c build/runtime.o "$(TCC_HOME)/lib/libtcc.a"
 
-build/path-regressions: test/path-regressions.c $(FRONT) $(TARGET) $(DRIVER) $(HEADERS) build/domain.c
+build/path-regressions: test/path-regressions.c test/mock-ollama.c $(FRONT) $(TARGET) $(DRIVER) $(HEADERS) build/domain.c
 	$(TCC) $(CFLAGS) -o $@ test/path-regressions.c $(FRONT) $(TARGET) $(DRIVER) build/domain.c
 
 build/terminal: test/terminal.c

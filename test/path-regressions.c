@@ -14,6 +14,8 @@
 #include "json.h"
 #include "runtime/driver.h"
 
+#include "mock-ollama.c"
+
 static int cases_run = 0;
 
 /* Exercise append with an exact-size input, so sanitizers can detect reads
@@ -144,6 +146,10 @@ static int io_deep_type(void) {
 static const char *pr_trash_root = PR_TRASH_ROOT;
 static TrashForm pr_trash_form = TRASH_MACOS;
 static int pr_force_exdev = 0;
+/* The ollama fields (S7 Q15 (a)): NULL is the default endpoint, which no
+   row may connect to (port 11434). */
+static const char *pr_ollama_host = NULL;
+static uint32_t pr_ollama_timeout_ms = 0;
 
 /* Runs SOURCE in the IO driver: gives the status (-1 when the run did not
    start), *BYTES (malloc'd, *LEN bytes and a NUL after them; NULL when
@@ -164,7 +170,8 @@ static int io_driver_exec(const char *source, const char *input, int argc, char 
   in = input[0] ? fmemopen((void *)input, strlen(input), "r") : fopen("/dev/null", "r");
   stream = read_only ? fopen("/dev/null", "r") : open_memstream(bytes, len);
   if (in && stream && checked(&arena, &m, diag, source) && io_main(&m, &index)) {
-    IoEnv env = {budget, in, stream, argc, argv, pr_trash_root, pr_trash_form, pr_force_exdev};
+    IoEnv env = {budget, in, stream, argc, argv, pr_trash_root, pr_trash_form, pr_force_exdev, pr_ollama_host,
+                 pr_ollama_timeout_ms};
     got = io_run(&m, def_value(&m, index), &env);
   }
   if (in) fclose(in);
@@ -374,6 +381,78 @@ static int fs_case(const char *label, const char *call, int text, const char *ou
     return 0;
   }
   return io_driver_case(label, source, "", 0, NULL, EVAL_FUEL_STEPS, out, 0, NULL);
+}
+
+/* Full byte comparisons also cover NUL bytes in an HTTP error text. */
+static int ollama_response_case(const char *label, const char *response, size_t response_len,
+                                int error, const char *detail, size_t detail_len) {
+  MockOllama server;
+  char host[64];
+  char source[1024];
+  char expected[2048];
+  char *bytes = NULL;
+  size_t len = 0;
+  size_t prefix = 0;
+  Diag diag;
+  int got;
+  int ok;
+  cases_run++;
+  if (!mock_ollama_start(&server, response, response_len)) {
+    fprintf(stderr, "FAIL ollama fixture: %s: %s\n", label, strerror(errno));
+    return 0;
+  }
+  snprintf(host, sizeof host, "127.0.0.1:%u", server.port);
+  if (error) prefix = (size_t)snprintf(expected, sizeof expected, "inl ollama: http://%s/mock: ", host);
+  ok = prefix + detail_len <= sizeof expected && fs_source(source, sizeof source, "ollama \"/mock\" (jobj jfNil)", 0);
+  if (ok) memcpy(expected + prefix, detail, detail_len);
+  pr_ollama_host = host;
+  pr_ollama_timeout_ms = 1000u;
+  got = ok ? io_driver_exec(source, "", 0, NULL, EVAL_FUEL_STEPS, 0, &diag, &bytes, &len) : -1;
+  pr_ollama_host = NULL;
+  pr_ollama_timeout_ms = 0;
+  ok = mock_ollama_finish(&server) && ok && got == 0 && !diag.set
+    && len == prefix + detail_len && (len == 0u || memcmp(bytes, expected, len) == 0);
+  if (!ok) {
+    fprintf(stderr, "FAIL ollama response: %s: status %d, %zu bytes, expected %zu\n", label, got, len, prefix + detail_len);
+    if (got >= 0 && diag.set) diag_print(&diag, stderr);
+  }
+  free(bytes);
+  return ok;
+}
+
+#define OLLAMA_ROW(label, response, error, expected) \
+  ollama_response_case(label, response, sizeof(response) - 1u, error, expected, sizeof(expected) - 1u)
+
+static int ollama_response_rows(void) {
+  const char *chunked = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\n{}\n\r\n";
+  char response[1200];
+  char detail[1000];
+  int failed = 0;
+  failed += !OLLAMA_ROW("ollama Content-Length", "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", 0, "[{}]");
+  failed += !OLLAMA_ROW("ollama Content-Length whitespace", "HTTP/1.1 200 OK\r\nContent-Length: 2 \t\r\n\r\n{}", 0, "[{}]");
+  snprintf(response, sizeof response, "%s0\r\n", chunked);
+  failed += !ollama_response_case("ollama cut final chunk", response, strlen(response), 1,
+    "the stream ends before its end", strlen("the stream ends before its end"));
+  snprintf(response, sizeof response, "%s0\r\nX-End: yes\r\n", chunked);
+  failed += !ollama_response_case("ollama cut trailer", response, strlen(response), 1,
+    "the stream ends before its end", strlen("the stream ends before its end"));
+  snprintf(response, sizeof response, "%s0\r\n\r\n", chunked);
+  failed += !ollama_response_case("ollama complete final chunk", response, strlen(response), 0, "[{}]", 4u);
+  snprintf(response, sizeof response, "%s0\r\nX-End: yes\r\n\r\n", chunked);
+  failed += !ollama_response_case("ollama complete trailer", response, strlen(response), 0, "[{}]", 4u);
+  failed += !OLLAMA_ROW("ollama JSON error NUL", "HTTP/1.1 400 Bad Request\r\n\r\n{\"error\":\"a\\u0000b\"}", 1, "400: a\0b");
+  failed += !OLLAMA_ROW("ollama raw error NUL", "HTTP/1.1 500 Error\r\n\r\na\0b", 1, "500: a\0b");
+  memcpy(detail, "400: ", 5u);
+  memset(detail + 5u, 'x', 900u);
+  detail[905] = '\0';
+  snprintf(response, sizeof response, "HTTP/1.1 400 Bad Request\r\n\r\n{\"error\":\"%s\"}", detail + 5u);
+  failed += !ollama_response_case("ollama long JSON error", response, strlen(response), 1, detail, 905u);
+  memcpy(response, "HTTP/1.1 500 Error\r\n\r\n", 22u);
+  memset(response + 22u, 'x', 600u);
+  memcpy(detail, "500: ", 5u);
+  memset(detail + 5u, 'x', 512u);
+  failed += !ollama_response_case("ollama raw error limit", response, 622u, 1, detail, 517u);
+  return failed;
 }
 
 /* 1 when A and B differ by at most 64 MiB (the free bytes drift between
@@ -1119,6 +1198,7 @@ static int json_nesting(void) {
 
 int main(void) {
   int failed = 0;
+  signal(SIGPIPE, SIG_IGN);
   failed += !nat_literal_oom();
   failed += !accepts("Json signed number payload",
     "def signed : Json := jnum (inl 7)\n");
@@ -1837,6 +1917,7 @@ int main(void) {
     failed += !io_loop_rounds();
     failed += fs_read_rows();
     failed += fs_write_rows();
+    failed += ollama_response_rows();
   }
   printf("path regressions: %d checked, %d failed\n", cases_run, failed);
   return failed != 0;

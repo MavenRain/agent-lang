@@ -1785,3 +1785,57 @@ M1 and M2 ran after `git add`, each with `make -B check`, and were
 restored with `git checkout -- domain/domain.lang` (`git diff --quiet`
 gives 0). `make -B check` after the restore is GREEN. M3 to M10 run in
 S7 chunk C (driver mutants).
+
+### Chunk B:  driver and path regressions (PARTIAL, part 1 of 2)
+
+Part 1 adds the driver of `ollama` (S7 Q2 to Q11, Q15 and Q18 (a)).
+The mock server, the path regressions, the Makefile edit and the
+SIGPIPE edits of the 2 runners are part 2. U1 is set:  the sandbox
+`bind` probe gives rc 0 (2026-10-21).
+
+Precondition:  HEAD e84f97a (the USER S7 A commit), tree 0d2ad698,
+`git status --short` empty. `make -B check` GREEN at the chunk A counts,
+`make -B check-clang` rc 0.
+
+Edit sites:
+
+- src/runtime/driver.h:  the IoEnv fields `ollama_host` and
+  `ollama_timeout_ms`, OllamaEndpoint and `ollama_endpoint`.
+- src/runtime/driver.c:  the includes (netdb.h, netinet/in.h,
+  sys/socket.h, sys/time.h, front/jsontext.h), IoNames `ollama`,
+  io_names (`ollamaOp`, 3 fields), LAYER_OLLAMA, layer_of, the io_step
+  case and the functions `ollama_endpoint`, `ollama_path`, `ollama_url`,
+  `ollama_connect`, `ollama_request`, `ollama_read` (the 64 MiB limit),
+  `ollama_chunks`, `ollama_decode`, `ollama_status_fail`, `ollama_lines`
+  and `ollama_call`.
+- src/runtime/rt_main.c:  OLLAMA_HOST into IoEnv (an empty value is
+  NULL) and the 2 initializers. rt_main.c already ignores SIGPIPE.
+- test/path-regressions.c:  `pr_ollama_host`, `pr_ollama_timeout_ms` and
+  the IoEnv initializer.
+
+Gate:  `make -B check` GREEN at the chunk A counts (path regressions
+262, terminal 21);  `make -B check-clang` rc 0. The dash sweep is
+empty. `git diff --check` is clean. No new row in part 1.
+
+| Id | Deviation |
+|---|---|
+| D1 | Chunk B is in 2 parts:  the session got to its hand-off limit after the driver. Part 1 has no new row. |
+| D2 | The error texts that the kickoff does not name:  `ollama: PATH: the path does not start with /`, `ollama: PATH: the path holds a space or a control byte`, `ollama: the path holds a NUL byte`, `ollama: URL: the headers do not end with CRLF CRLF`, `ollama: URL: the status line is not valid`, `ollama: URL: a header line is not valid`, `ollama: URL: the Content-Length is not valid`, `ollama: URL: a chunk size is not valid`, `ollama: URL: a chunk does not end with CRLF`, `ollama: URL: the body does not render to a JSON text`, `ollama: URL: the write timed out`. The OLLAMA_HOST texts:  `https is not supported`, `a path is not supported`, `the host has no ]`, `the host is empty`, `the host is longer than 255 bytes`, `the text after the host is not a port`, `the port is not 1 to 65535`. |
+| D3 | An OLLAMA_HOST value `HOST/` (a slash with no path) is a path:  `a path is not supported`. |
+
+#### Staged review corrections
+
+The review added ten C path regressions and a loopback mock in
+`test/mock-ollama.c` (one forked child per response, port 0). Six rows
+failed against the original staged driver. The corrections require the
+blank line after the zero chunk and any trailers, accept trailing space
+and tab in Content-Length, and preserve the full JSON error string,
+including NUL bytes. A raw error body still stops at 512 bytes.
+
+The path runner now ignores SIGPIPE and its Makefile dependency includes
+the mock source. These review additions cover the three findings; the
+remaining chunk B part 2 work above is still pending.
+
+Validation in one isolated copy: `make check` and `make check-clang` rc 0;
+path regressions 272, terminal environment 4, terminal 21, all with zero
+failures. No existing assertion or check was removed or relaxed.

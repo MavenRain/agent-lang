@@ -43,15 +43,18 @@ int main(int argc, char **argv) {
   int status = 1;
   static char root[4096];
 #ifdef __APPLE__
-  IoEnv env = {EVAL_FUEL_STEPS, NULL, NULL, 0, NULL, NULL, TRASH_MACOS, 0};
+  IoEnv env = {EVAL_FUEL_STEPS, NULL, NULL, 0, NULL, NULL, TRASH_MACOS, 0, NULL, 0};
 #else
-  IoEnv env = {EVAL_FUEL_STEPS, NULL, NULL, 0, NULL, NULL, TRASH_XDG, 0};
+  IoEnv env = {EVAL_FUEL_STEPS, NULL, NULL, 0, NULL, NULL, TRASH_XDG, 0, NULL, 0};
 #endif
+  const char *ollama_host = getenv("OLLAMA_HOST");
   env.in = stdin;
   env.out = stdout;
   env.argc = argc;
   env.argv = argv;
   env.trash_root = trash_root(root, sizeof root);
+  /* S7 Q4 and Q15 (a): an empty value is no value. */
+  env.ollama_host = ollama_host != NULL && ollama_host[0] != '\0' ? ollama_host : NULL;
   signal(SIGPIPE, SIG_IGN);
   diag_init(&diag);
   arena_init(&arena, ARENA_LIMIT_BYTES);

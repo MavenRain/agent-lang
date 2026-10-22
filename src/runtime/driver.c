@@ -2,19 +2,25 @@
    run, tau t gives v := t, and an operation runs, then v := k r. The
    driver finds the layer constructors by name once at the start. A
    filesystem operation (S6) gives inl of the text `NAME: PATH: TEXT`
-   (Q12 (a)) or inr of the value: a value, not an exit. */
+   (Q12 (a)) or inr of the value: a value, not an exit. ollama (S7) gives
+   inl of `ollama: URL: TEXT` (Q18 (a)) or inr of the response objects. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "front/jsontext.h"
 #include "runtime/driver.h"
 
 typedef struct {
@@ -33,6 +39,7 @@ typedef struct {
   uint32_t move;
   uint32_t copy;
   uint32_t trash;
+  uint32_t ollama;
   uint32_t jnum;
   uint32_t jstr;
   uint32_t jarr;
@@ -77,6 +84,7 @@ typedef enum {
   LAYER_MOVE,
   LAYER_COPY,
   LAYER_TRASH,
+  LAYER_OLLAMA,
   LAYER_OTHER
 } Layer;
 
@@ -131,6 +139,7 @@ static int io_names(const Machine *m, IoNames *n) {
     && find_ctor(m, layer, "diskUsageOp", 2u, &n->disk_usage)
     && find_ctor(m, layer, "makeDirOp", 2u, &n->make_dir) && find_ctor(m, layer, "moveOp", 3u, &n->move)
     && find_ctor(m, layer, "copyOp", 3u, &n->copy) && find_ctor(m, layer, "trashOp", 2u, &n->trash)
+    && find_ctor(m, layer, "ollamaOp", 3u, &n->ollama)
     && find_family(m, "Json", &json) && find_family(m, "JsonList", &list) && find_family(m, "JsonFields", &fields)
     && find_ctor(m, json, "jnum", 1u, &n->jnum) && find_ctor(m, json, "jstr", 1u, &n->jstr)
     && find_ctor(m, json, "jarr", 1u, &n->jarr) && find_ctor(m, json, "jobj", 1u, &n->jobj)
@@ -155,6 +164,7 @@ static Layer layer_of(const IoNames *n, const Value *layer) {
   if (layer->inst == n->move) return LAYER_MOVE;
   if (layer->inst == n->copy) return LAYER_COPY;
   if (layer->inst == n->trash) return LAYER_TRASH;
+  if (layer->inst == n->ollama) return LAYER_OLLAMA;
   return LAYER_OTHER;
 }
 
@@ -1078,6 +1088,374 @@ static const Value *trash_path(Machine *m, const IoRun *run, const Value *arg) {
   return ok ? fs_unit(m) : fs_fault_value(m, "trash", &f);
 }
 
+/* ---- ollama (S7) ---- */
+
+#define OLLAMA_PORT 11434u
+/* The size limit of a raw response (S7 Q10 (a)). */
+#define OLLAMA_LIMIT ((size_t)64 << 20)
+#define OLLAMA_CUT "the stream ends before its end"
+
+const char *ollama_endpoint(const char *text, OllamaEndpoint *out) {
+  const char *s = text == NULL || text[0] == '\0' ? "127.0.0.1" : text;
+  const char *host = NULL;
+  const char *end = NULL;
+  const char *rest = NULL;
+  unsigned long port = OLLAMA_PORT;
+  size_t len = 0;
+  out->host[0] = '\0';
+  out->port = OLLAMA_PORT;
+  out->v6 = 0;
+  if (strncmp(s, "https://", 8u) == 0) return "https is not supported";
+  if (strncmp(s, "http://", 7u) == 0) s += 7;
+  if (strchr(s, '/') != NULL) return "a path is not supported";
+  out->v6 = s[0] == '[';
+  host = out->v6 ? s + 1 : s;
+  end = out->v6 ? strchr(host, ']') : host + strcspn(host, ":");
+  if (end == NULL) return "the host has no ]";
+  rest = out->v6 ? end + 1 : end;
+  len = (size_t)(end - host);
+  if (len == 0u) return "the host is empty";
+  if (len >= sizeof out->host) return "the host is longer than 255 bytes";
+  if (rest[0] != '\0' && rest[0] != ':') return "the text after the host is not a port";
+  if (rest[0] == ':') {
+    size_t count = strspn(rest + 1, "0123456789");
+    port = count == 0u || count > 5u || rest[1 + count] != '\0' ? 0ul : strtoul(rest + 1, NULL, 10);
+    if (port < 1ul || port > 65535ul) return "the port is not 1 to 65535";
+  }
+  memcpy(out->host, host, len);
+  out->host[len] = '\0';
+  out->port = (unsigned)port;
+  return NULL;
+}
+
+/* The first SIZE bytes NEEDLE in the LEN bytes at HAY, or NULL. */
+static char *ollama_seek(char *hay, size_t len, const char *needle, size_t size) {
+  for (size_t i = 0; i + size <= len; i++) {
+    if (memcmp(hay + i, needle, size) == 0) return hay + i;
+  }
+  return NULL;
+}
+
+/* 1 when the LEN bytes at A are the lower case NAME, without case. */
+static int ollama_name(const char *a, size_t len, const char *name) {
+  size_t i = 0;
+  while (i < len && name[i] != '\0' && (a[i] >= 'A' && a[i] <= 'Z' ? a[i] + 32 : a[i]) == name[i]) i++;
+  return i == len && name[i] == '\0';
+}
+
+/* 1 when the LEN bytes at A hold the lower case WORD, without case. */
+static int ollama_holds(const char *a, size_t len, const char *word) {
+  size_t size = strlen(word);
+  for (size_t i = 0; i + size <= len; i++) {
+    if (ollama_name(a + i, size, word)) return 1;
+  }
+  return 0;
+}
+
+static int ollama_hex(char c) {
+  return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+/* The path (S7 Q2 (a)): a / first, and no byte at or below 0x20 and no
+   0x7F (no request smuggling). Returns NULL, or the error text. */
+static const char *ollama_path(const char *path) {
+  if (path[0] != '/') return "the path does not start with /";
+  for (const char *p = path; *p != '\0'; p++) {
+    if ((unsigned char)*p <= 0x20u || (unsigned char)*p == 0x7Fu) return "the path holds a space or a control byte";
+  }
+  return NULL;
+}
+
+/* http://HOST:PORT then the path, in the arena (S7 Q18 (a)). */
+static const char *ollama_url(Machine *m, const OllamaEndpoint *ep, const char *path) {
+  const char *l = ep->v6 ? "[" : "";
+  const char *r = ep->v6 ? "]" : "";
+  int len = snprintf(NULL, 0, "http://%s%s%s:%u%s", l, ep->host, r, ep->port, path);
+  char *url = len < 0 ? NULL : arena_alloc(m->arena, (size_t)len + 1u);
+  if (url == NULL) {
+    diag_fail(m->diag, "OOM", m->def, "no memory for the URL of ollama");
+    return NULL;
+  }
+  snprintf(url, (size_t)len + 1u, "http://%s%s%s:%u%s", l, ep->host, r, ep->port, path);
+  return url;
+}
+
+/* Connects to EP (getaddrinfo, then each address). Gives the socket, or
+   -1 and *ERROR: the gai_strerror text or the strerror of the last
+   connect. TIMEOUT_MS 0: no timeout (S7 Q9 (a)). */
+static int ollama_connect(const OllamaEndpoint *ep, uint32_t timeout_ms, const char **error) {
+  struct addrinfo hints;
+  struct addrinfo *list = NULL;
+  struct timeval tv;
+  char port[8];
+  int fd = -1;
+  int last = ECONNREFUSED;
+  int got = 0;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  snprintf(port, sizeof port, "%u", ep->port);
+  got = getaddrinfo(ep->host, port, &hints, &list);
+  if (got != 0) {
+    *error = gai_strerror(got);
+    return -1;
+  }
+  tv.tv_sec = (time_t)(timeout_ms / 1000u);
+  tv.tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u);
+  for (const struct addrinfo *a = list; a != NULL && fd < 0; a = a->ai_next) {
+    fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+    if (fd >= 0 && timeout_ms != 0u)
+      (void)(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv) | setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv));
+    if (fd < 0) last = errno;
+    if (fd >= 0 && connect(fd, a->ai_addr, a->ai_addrlen) != 0) {
+      last = errno;
+      close(fd);
+      fd = -1;
+    }
+  }
+  freeaddrinfo(list);
+  *error = fd < 0 ? strerror(last) : NULL;
+  return fd;
+}
+
+static const char *ollama_errno(int error, const char *timed_out) {
+  return error == EAGAIN || error == EWOULDBLOCK ? timed_out : strerror(error);
+}
+
+/* Writes the request (S7 Q5 (a)): POST, the 4 headers, then BODY.
+   Returns NULL, or the error text. */
+static const char *ollama_request(int fd, const OllamaEndpoint *ep, const char *path, const Value *body) {
+  const char *l = ep->v6 ? "[" : "";
+  const char *r = ep->v6 ? "]" : "";
+  const char *form = "POST %s HTTP/1.1\r\nHost: %s%s%s:%u\r\nContent-Type: application/json\r\nContent-Length: %llu\r\n"
+                     "Connection: close\r\n\r\n";
+  int len = snprintf(NULL, 0, form, path, l, ep->host, r, ep->port, (unsigned long long)body->nat);
+  char *head = len < 0 ? NULL : malloc((size_t)len + 1u);
+  int error = 0;
+  if (head == NULL) return "no memory for the request";
+  snprintf(head, (size_t)len + 1u, form, path, l, ep->host, r, ep->port, (unsigned long long)body->nat);
+  error = fs_write_all(fd, head, (size_t)len);
+  error = error != 0 ? error : fs_write_all(fd, body->name, (size_t)body->nat);
+  free(head);
+  return error == 0 ? NULL : ollama_errno(error, "the write timed out");
+}
+
+/* Reads to the close (Connection: close) into *BYTES (malloc'd, *LEN
+   bytes), at most OLLAMA_LIMIT bytes (S7 Q10 (a)). Returns NULL, or the
+   error text. */
+static const char *ollama_read(int fd, char **bytes, size_t *len) {
+  const char *error = NULL;
+  size_t cap = 0;
+  ssize_t got = 1;
+  *len = 0;
+  while (error == NULL && got != 0) {
+    size_t grow = *len < cap ? cap : cap == 0u ? 65536u : cap * 2u;
+    char *more = grow == cap ? *bytes : realloc(*bytes, grow);
+    if (more == NULL) error = "no memory for the response";
+    *bytes = more == NULL ? *bytes : more;
+    cap = more == NULL ? cap : grow;
+    got = error == NULL ? read(fd, *bytes + *len, cap - *len) : 0;
+    if (got > 0) *len += (size_t)got;
+    if (got < 0 && errno != EINTR) error = ollama_errno(errno, "the read timed out");
+    if (*len > OLLAMA_LIMIT) error = "the response is larger than 67108864 bytes";
+  }
+  return error;
+}
+
+/* The chunked body (S7 Q6 (a)): hex size, `;` extensions skipped, the
+   trailer after the 0 chunk skipped. Decodes in place into *OUT bytes.
+   Returns NULL, or the error text. */
+static const char *ollama_chunks(char *body, size_t len, size_t *out) {
+  size_t at = 0;
+  size_t put = 0;
+  int done = 0;
+  while (!done) {
+    const char *eol = ollama_seek(body + at, len - at, "\r\n", 2u);
+    size_t size = 0;
+    size_t digits = 0;
+    while (at + digits < len && digits < 16u && ollama_hex(body[at + digits]) >= 0) {
+      size = size * 16u + (size_t)ollama_hex(body[at + digits]);
+      digits++;
+    }
+    if (eol == NULL) return OLLAMA_CUT;
+    if (digits == 0u || digits == 16u || (body[at + digits] != ';' && body[at + digits] != '\r')) return "a chunk size is not valid";
+    at = (size_t)(eol - body) + 2u;
+    if (size == 0u) {
+      if (len - at < 2u || (memcmp(body + at, "\r\n", 2u) != 0
+          && ollama_seek(body + at, len - at, "\r\n\r\n", 4u) == NULL)) return OLLAMA_CUT;
+      done = 1;
+    } else if (len - at < size + 2u) {
+      return OLLAMA_CUT;
+    } else if (memcmp(body + at + size, "\r\n", 2u) != 0) {
+      return "a chunk does not end with CRLF";
+    } else {
+      memmove(body + put, body + at, size);
+      put += size;
+      at += size + 2u;
+    }
+  }
+  *out = put;
+  return NULL;
+}
+
+/* The status line, the headers to the first CRLF CRLF (the names without
+   case) and the body (S7 Q6 (a)): chunked, else Content-Length, else the
+   bytes to the close. Returns NULL, or the error text. */
+static const char *ollama_decode(char *bytes, size_t len, unsigned *status, char **body, size_t *body_len) {
+  char *end = bytes == NULL ? NULL : ollama_seek(bytes, len, "\r\n\r\n", 4u);
+  char *line = NULL;
+  int chunked = 0;
+  int sized = 0;
+  unsigned long long length = 0;
+  size_t rest = 0;
+  if (len < 13u || (memcmp(bytes, "HTTP/1.0 ", 9u) != 0 && memcmp(bytes, "HTTP/1.1 ", 9u) != 0) || bytes[9] < '0' || bytes[9] > '9'
+      || bytes[10] < '0' || bytes[10] > '9' || bytes[11] < '0' || bytes[11] > '9' || (bytes[12] != ' ' && bytes[12] != '\r'))
+    return "the status line is not valid";
+  if (end == NULL) return "the headers do not end with CRLF CRLF";
+  *status = (unsigned)((bytes[9] - '0') * 100 + (bytes[10] - '0') * 10 + (bytes[11] - '0'));
+  line = ollama_seek(bytes, (size_t)(end - bytes) + 2u, "\r\n", 2u) + 2;
+  while (line < end + 2) {
+    char *eol = ollama_seek(line, (size_t)(end + 2 - line), "\r\n", 2u);
+    char *colon = memchr(line, ':', (size_t)(eol - line));
+    char *value = colon == NULL ? NULL : colon + 1;
+    if (colon == NULL) return "a header line is not valid";
+    while (value < eol && (*value == ' ' || *value == '\t')) value++;
+    if (ollama_name(line, (size_t)(colon - line), "transfer-encoding") && ollama_holds(value, (size_t)(eol - value), "chunked"))
+      chunked = 1;
+    if (ollama_name(line, (size_t)(colon - line), "content-length")) {
+      const char *last = eol;
+      size_t count = 0;
+      while (last > value && (last[-1] == ' ' || last[-1] == '\t')) last--;
+      while (value + count < last && value[count] >= '0' && value[count] <= '9') count++;
+      if (count == 0u || count > 19u || value + count != last) return "the Content-Length is not valid";
+      length = strtoull(value, NULL, 10);
+      sized = 1;
+    }
+    line = eol + 2;
+  }
+  *body = end + 4;
+  rest = len - (size_t)(end + 4 - bytes);
+  if (chunked) return ollama_chunks(*body, rest, body_len);
+  if (sized && length > rest) return OLLAMA_CUT;
+  *body_len = sized ? (size_t)length : rest;
+  return NULL;
+}
+
+/* The `error` string of the Json object V, or NULL. */
+static const Value *ollama_error_field(const IoNames *n, const Value *v) {
+  const Value *f = val_is(v, OP_CTOR) && v->inst == n->jobj ? v->args[0] : NULL;
+  while (f != NULL && val_is(f, OP_CTOR) && f->inst == n->jf_cons) {
+    const Value *key = f->args[0];
+    const Value *value = f->args[1];
+    if (key->kind == VAL_TEXT && key->nat == 5u && memcmp(key->name, "error", 5u) == 0 && val_is(value, OP_CTOR) && value->inst == n->jstr
+        && value->args[0]->kind == VAL_TEXT)
+      return value->args[0];
+    f = f->args[2];
+  }
+  return NULL;
+}
+
+/* inl of `ollama: URL: NNN: TEXT` (S7 Q7 (a)): TEXT is the `error`
+   string of a JSON object body, else the body bytes (at most 512). */
+static const Value *ollama_status_fail(Machine *m, const IoNames *n, const char *url, unsigned status, const char *body, size_t len) {
+  const Value *text = arena_text(m, body, len);
+  const Value *parsed = text == NULL ? NULL : json_parse_value(m, text);
+  const Value *error = parsed != NULL && val_is(parsed, OP_INR) ? ollama_error_field(n, parsed->args[0]) : NULL;
+  size_t size = error != NULL ? (size_t)error->nat : len > 512u ? 512u : len;
+  int prefix;
+  char *bytes;
+  if (parsed == NULL) return NULL;
+  prefix = snprintf(NULL, 0, "ollama: %s: %03u: ", url, status);
+  bytes = prefix < 0 ? NULL : arena_alloc(m->arena, (size_t)prefix + size + 1u);
+  if (bytes == NULL) {
+    diag_fail(m->diag, "OOM", m->def, "no memory for the error text of ollama");
+    return NULL;
+  }
+  snprintf(bytes, (size_t)prefix + 1u, "ollama: %s: %03u: ", url, status);
+  if (size > 0u) memcpy(bytes + prefix, error != NULL ? error->name : body, size);
+  bytes[(size_t)prefix + size] = '\0';
+  text = val_text(m, bytes, (size_t)prefix + size);
+  return text == NULL ? NULL : val_make(m, OP_INL, 0, 1, text, NULL, NULL);
+}
+
+/* The NDJSON lines of BODY (S7 Q8 (a)): an empty line (or \r only) is
+   skipped, a last line with no \n is a line, each line goes to
+   jsonParse. inr (jarr) of the objects in order, else inl of
+   `ollama: URL: line N: TEXT`. */
+static const Value *ollama_lines(Machine *m, const IoNames *n, const IoRun *run, const char *url, const char *body, size_t len) {
+  const Value **items = NULL;
+  const Value *list = run->jl_nil;
+  const Value *fail = NULL;
+  size_t count = 0;
+  size_t at = 0;
+  unsigned line = 0;
+  int halt = 0;
+  while (at < len && !halt) {
+    const char *nl = memchr(body + at, '\n', len - at);
+    size_t end = nl == NULL ? len : (size_t)(nl - body);
+    size_t size = end > at && body[end - 1u] == '\r' ? end - at - 1u : end - at;
+    const Value *text = size == 0u ? NULL : arena_text(m, body + at, size);
+    const Value *parsed = text == NULL ? NULL : json_parse_value(m, text);
+    const Value **more = parsed != NULL && val_is(parsed, OP_INR) ? realloc(items, (count + 1u) * sizeof *items) : items;
+    line++;
+    if (size > 0u && parsed != NULL && !val_is(parsed, OP_INR)) {
+      char detail[600];
+      snprintf(detail, sizeof detail, "line %u: %.*s", line, (int)parsed->args[0]->nat, parsed->args[0]->name);
+      fail = fs_fail(m, "ollama", url, detail);
+      halt = 1;
+    } else if (size > 0u && (parsed == NULL || more == NULL)) {
+      if (parsed != NULL) diag_fail(m->diag, "OOM", m->def, "no memory for the lines of a response");
+      halt = 1;
+    } else if (size > 0u) {
+      items = more;
+      items[count++] = parsed->args[0];
+    }
+    at = end + 1u;
+  }
+  for (size_t i = count; !halt && i > 0u && list != NULL; i--)
+    list = json_cons(m, n, items[i - 1u], list);
+  free(items);
+  return halt ? fail : fs_ok(m, json_wrap(m, n->jarr, list));
+}
+
+/* ollama (S7): POST PATH with the jsonRender text of BODY to the endpoint
+   of the env (one connection, Connection: close). A 2xx status gives inr
+   (jarr) of the NDJSON objects (Q3 (a)). */
+static const Value *ollama_call(Machine *m, const IoNames *n, const IoRun *run, const Value *path_arg, const Value *body_arg) {
+  OllamaEndpoint ep;
+  const char *path = NULL;
+  const char *error = NULL;
+  const char *url = NULL;
+  const Value *body = NULL;
+  const Value *result = NULL;
+  char *bytes = NULL;
+  char *reply = NULL;
+  size_t len = 0;
+  size_t reply_len = 0;
+  unsigned status = 0;
+  int fd = -1;
+  if (!fs_text(m, path_arg, &path)) return NULL;
+  if (path == NULL) return fs_fail(m, "ollama", NULL, "the path holds a NUL byte");
+  error = ollama_path(path);
+  if (error != NULL) return fs_fail(m, "ollama", path, error);
+  error = ollama_endpoint(run->env->ollama_host, &ep);
+  if (error != NULL) return fs_fail(m, "ollama", "OLLAMA_HOST", error);
+  url = ollama_url(m, &ep, path);
+  body = url == NULL ? NULL : json_render_value(m, body_arg);
+  if (body == NULL) return NULL;
+  if (body->kind != VAL_TEXT) return fs_fail(m, "ollama", url, "the body does not render to a JSON text");
+  fd = ollama_connect(&ep, run->env->ollama_timeout_ms, &error);
+  error = fd < 0 ? error : ollama_request(fd, &ep, path, body);
+  error = error != NULL ? error : ollama_read(fd, &bytes, &len);
+  if (fd >= 0) close(fd);
+  error = error != NULL ? error : ollama_decode(bytes, len, &status, &reply, &reply_len);
+  result = error != NULL ? fs_fail(m, "ollama", url, error)
+         : status < 200u || status > 299u ? ollama_status_fail(m, n, url, status, reply, reply_len)
+         : ollama_lines(m, n, run, url, reply, reply_len);
+  free(bytes);
+  return result;
+}
+
 /* The shared values of a run. Gives 0 after an OOM diagnostic. */
 static int io_run_init(Machine *m, const IoNames *n, const IoEnv *env, IoRun *run) {
   int ok = 1;
@@ -1157,6 +1535,10 @@ static int io_step(Machine *m, const IoNames *n, const IoRun *run, const Value *
   case LAYER_TRASH:
     response = trash_path(m, run, field[0]);
     next = field[1];
+    break;
+  case LAYER_OLLAMA:
+    response = ollama_call(m, n, run, field[0], field[1]);
+    next = field[2];
     break;
   case LAYER_OTHER:
     diag_fail(m->diag, "INTERNAL", m->def, "the IO driver found a layer that is not an IO constructor");
