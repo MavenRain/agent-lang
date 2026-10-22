@@ -59,6 +59,7 @@ int main(void) {
     char *const *row;
     char *const *refused;
     char *const *trash;
+    char *const *down;
     int hosts = 0;
     int good = 0;
     int stray = 0;
@@ -76,6 +77,14 @@ int main(void) {
     trash = fixture_env("trash-home");
     for (i = 0; trash != NULL && trash[i] != NULL; i++) stray += strncmp(trash[i], "OLLAMA_HOST=", 12) == 0;
     expect(refused != NULL && trash != NULL && stray == 0, "the parent OLLAMA_HOST is dropped");
+    down = fixture_env("ollama-chat-down");
+    hosts = 0;
+    good = 0;
+    for (i = 0; down != NULL && down[i] != NULL; i++) {
+      hosts += strncmp(down[i], "OLLAMA_HOST=", 12) == 0;
+      good += strcmp(down[i], "OLLAMA_HOST=127.0.0.1:1") == 0;
+    }
+    expect(down != NULL && hosts == 1 && good == 1, "ollama-chat-down gets OLLAMA_HOST=127.0.0.1:1");
     mock_port = 0;
     environ = saved_env;
   }

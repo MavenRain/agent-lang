@@ -2039,3 +2039,72 @@ the clang check, examples 35, parse refusals 14, check refusals 88,
 evals 196, json 35, json refusals 4, regressions 6, printer regressions 2,
 path regressions 300, terminal environment 8 and terminal 29. No checks
 were weakened. No remaining review findings.
+
+### Chunk B:  the chat example and the chat rows
+
+Hand build on 87aa5d9 (the USER commit of S8 chunk A with the review
+fix), from the S8 kickoff (agent-lang-work/S8-kickoff.md, outside the
+repo).  RULINGS Q1 to Q15 = a.
+
+- examples/chat.lang, one file with no import (Q1 (a)):  noJson,
+  itemsOf, fieldOf, textOf and firstText of examples/organize.lang,
+  entry, snocList (the Log fold into a function on JsonList), messages,
+  request (`"stream": false`, Q2 (a)), reply (the message.content of the
+  first object), transcript, 4 sample defs, answer, ask, turn and main.
+  `chat MODEL` (Q3 (a):  with no argument, llama3.2) sends one
+  `/api/chat` call for each input line and writes the reply.  The Log
+  holds one entry for each message (Q4 (a)).  At a failed call, chat
+  writes the error text and the user line drops (Q5 (a)).  At the end
+  of the input, chat writes the transcript as one JSON array line (Q6
+  (a)).
+- test/eval/expect.txt:  4 evals (demoTranscript, demoRequest,
+  sampleReply `hi there`, threeOrder:  the order of a 3 entry Log).
+  test/json/chat.json:  the golden of `langc json examples/chat.lang`.
+- test/mock-ollama.c:  the script MOCK_API_CHAT at `/api/chat` (Q7 (a)):
+  one chat object with the content `reply N`, N the number of `"role":`
+  in the request body (mock_api_chat).  The switch of mock_answer stays
+  exhaustive.  test/path-regressions.c:  the row `ollama api chat` (2
+  entries with a role key give `reply 2`).
+- test/terminal.c:  the example rows ollama-chat-down and
+  ollama-chat-loop (examples/chat.lang).  fixture_env gives port 1 to
+  ollama-refused and ollama-chat-down.  test/term:  `.args` (`m`),
+  `.code` (0), `.in` and `.out` for each row, no `.lang`.
+  ollama-chat-loop:  3 input lines give `reply 1`, `reply 3`, `reply 5`
+  and a transcript of 6 entries.  ollama-chat-down:  2 lines give 2
+  `Connection refused` lines, then `[]`.
+- test/terminal-env.c:  one check that ollama-chat-down gets
+  OLLAMA_HOST=127.0.0.1:1.
+- No change:  domain/domain.lang, src/front/check.c,
+  src/runtime/driver.c, the fuel row budget (380).
+
+Gate:  `make -B check` GREEN:  examples 36, parse refusals 14, check
+refusals 88, evals 200, json 36, json refusals 4, `gate: 0 failures`,
+regressions 6, printer regressions 2, path regressions 301, terminal
+environment 9, terminal 31.  `make -B check-clang` rc 0.  The dash sweep
+and `git diff --check` are clean.  No mutant run (chunk C runs M1 to
+M10).
+
+The Q13 (a) measure (1000 input lines against the scripted mock, built
+in $TMPDIR from test/mock-ollama.c, no fix):  rc 0, 3.112 s (a second
+run:  2.86 s real).  The output has 1001 lines:  815 replies (`reply 1`
+to `reply 1629`), 185 lines `Connection reset by peer` (rounds 816 to
+1000) and the transcript line (65354 bytes, 1630 entries).
+
+- D1:  the USER commit 87aa5d9 is not the staged tree 0627d623 (the
+  review fix of chunk A:  applyArgs, fixture_args, the row
+  organize-empty-arg).  Thus the base counts are evals 196, terminal
+  environment 8 and terminal 29, and the chunk B counts are evals 200,
+  terminal environment 9 and terminal 31 (the kickoff:  about 195, 8
+  and 30).
+- D2:  mock_answer reads at most 65535 bytes of a request.  At round 816
+  the request body is larger:  the mock answers before the end of the
+  body and closes, and the call gives `Connection reset by peer`.  The
+  failed lines drop (Q5 (a)), thus the Log stays at 815 exchanges.  This
+  is a limit of the test mock, not of the driver.
+- D3:  no peak RSS for Q13:  in the sandbox, `ps` gives no row and
+  `/usr/bin/time -l` gives no RSS line (and exits 1).
+- D4:  ollama_case sends no role key (the mock gives `reply 0`), thus
+  the `/api/chat` regression calls fs_case with its own body.
+- D5:  for chunk C, the M8 to M10 texts are unique in
+  examples/chat.lang:  `rest (jlCons e t)` (snocList), `inr (logAppend
+  lu` (answer, leg inr) and `inr l)` (answer, leg inl).

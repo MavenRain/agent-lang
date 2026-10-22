@@ -102,6 +102,7 @@ typedef enum {
   MOCK_EMPTY,
   MOCK_MANY,
   MOCK_CHAT,
+  MOCK_API_CHAT,
   MOCK_NONE
 } MockScript;
 
@@ -109,7 +110,7 @@ typedef enum {
 static const char *const mock_paths[] = {
   "/mock/one", "/mock/stream", "/mock/length", "/mock/close", "/mock/echo", "/mock/404", "/mock/500",
   "/mock/midstream", "/mock/bad", "/mock/cut", "/mock/short", "/mock/lf", "/mock/slow", "/mock/numbers",
-  "/mock/empty", "/mock/many", "/mock/chat",
+  "/mock/empty", "/mock/many", "/mock/chat", "/api/chat",
 };
 
 /* /mock/numbers: an Int64, a fraction and a large integer (S7 Q11 (a)). */
@@ -191,6 +192,24 @@ static int mock_many(int fd) {
     i++;
   }
   return ok;
+}
+
+/* /api/chat (S8 Q7 (a)): one chat object with the content "reply N", N
+   the number of "role": in the request body (the body grows with each
+   round of the chat). */
+static int mock_api_chat(int fd, const char *request) {
+  char body[128];
+  const char *end = strstr(request, "\r\n\r\n");
+  const char *at = end != NULL ? strstr(end + 4, "\"role\":") : NULL;
+  int count = 0;
+  int size;
+  while (at != NULL) {
+    count++;
+    at = strstr(at + 7, "\"role\":");
+  }
+  size = snprintf(body, sizeof body,
+                  "{\"model\":\"m\",\"message\":{\"role\":\"assistant\",\"content\":\"reply %d\"},\"done\":true}", count);
+  return size > 0 && (size_t)size < sizeof body && mock_json(fd, "200 OK", body);
 }
 
 /* The script of REQUEST: its start is "POST PATH ". */
@@ -281,6 +300,9 @@ static void mock_answer(int fd, unsigned port) {
       break;
     case MOCK_CHAT:
       (void)mock_json(fd, "200 OK", "{\"model\":\"m\",\"message\":{\"role\":\"assistant\",\"content\":\"hi there\"},\"done\":true}");
+      break;
+    case MOCK_API_CHAT:
+      (void)mock_api_chat(fd, request);
       break;
     case MOCK_NONE:
       (void)mock_sized(fd, "404 Not Found", "{\"error\":\"no script\"}", 21u);

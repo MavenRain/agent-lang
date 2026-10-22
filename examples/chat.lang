@@ -1,0 +1,64 @@
+-- The chat loop (S8). chat MODEL reads the input lines. For each line, it
+-- sends the Log and the line to /api/chat at "stream": false, then writes
+-- the reply and a newline. The Log holds one entry {"role","content"} for
+-- each message. When the call fails, chat writes the error text, the user
+-- line does not go into the Log, and the loop goes on. At the end of the
+-- input, chat writes the transcript: the Log as one JSON array line. With
+-- no argument, MODEL is llama3.2. The file has no import: itemsOf, fieldOf
+-- and textOf are the folds of examples/ollama.lang.
+def noJson : List Json := nil
+def itemsOf : Json -> List Json :=
+  fun (j : Json) => second (fold (Prod Json (List Json)) (Prod JsonList (List Json)) JsonFields
+    (pair jnull noJson) (fun (b : Bool) => pair (jbool b) noJson) (fun (n : Sum Int64 Text) => pair (jnum n) noJson) (fun (t : Text) => pair (jstr t) noJson)
+    (fun (l : Prod JsonList (List Json)) => pair (jarr (first l)) (second l)) (fun (f : JsonFields) => pair (jobj f) noJson)
+    (pair jlNil noJson) (fun (h : Prod Json (List Json)) (t : Prod JsonList (List Json)) => pair (jlCons (first h) (first t)) (cons (first h) (second t)))
+    jfNil (fun (k : Text) (v : Prod Json (List Json)) (t : JsonFields) => jfCons k (first v) t) j)
+def fieldOf : Text -> Json -> Json :=
+  fun (k : Text) (j : Json) => second (fold (Prod Json Json) JsonList (Prod JsonFields Json)
+    (pair jnull jnull) (fun (b : Bool) => pair (jbool b) jnull) (fun (n : Sum Int64 Text) => pair (jnum n) jnull) (fun (t : Text) => pair (jstr t) jnull)
+    (fun (l : JsonList) => pair (jarr l) jnull) (fun (f : Prod JsonFields Json) => pair (jobj (first f)) (second f))
+    jlNil (fun (h : Prod Json Json) (t : JsonList) => jlCons (first h) t)
+    (pair jfNil jnull) (fun (key : Text) (v : Prod Json Json) (t : Prod JsonFields Json) => pair (jfCons key (first v) (first t)) (boolIf Json (textEq key k) (first v) (second t))) j)
+def textOf : Json -> Text :=
+  fun (j : Json) => fold Text Unit Unit "" (fun (b : Bool) => "") (fun (n : Sum Int64 Text) => "") (fun (t : Text) => t) (fun (l : Unit) => "") (fun (f : Unit) => "")
+    unit (fun (h : Text) (t : Unit) => unit) unit (fun (k : Text) (v : Text) (t : Unit) => unit) j
+-- firstText gives the first argument, or D when there is no argument.
+def firstText : Text -> Json -> Text :=
+  fun (d : Text) (a : Json) => fold (fun (x : Json) (rest : Text) => textOf x) d (itemsOf a)
+-- entry gives one message. The Log is a snoc list and jlCons adds at the
+-- front, thus snocList folds the Log into a function on JsonList, and
+-- messages keeps the Log order. request gives the body of the call. reply
+-- gives the message.content of the first response object.
+def entry : Text -> Text -> Json :=
+  fun (role : Text) (t : Text) => jobj (jfCons "role" (jstr role) (jfCons "content" (jstr t) jfNil))
+def snocList : Log -> JsonList -> JsonList :=
+  fun (l : Log) => fold (fun (t : JsonList) => t) (fun (rest : JsonList -> JsonList) (e : Json) (t : JsonList) => rest (jlCons e t)) l
+def messages : Log -> JsonList := fun (l : Log) => snocList l jlNil
+def request : Text -> Log -> Json :=
+  fun (m : Text) (l : Log) => jobj (jfCons "model" (jstr m) (jfCons "messages" (jarr (messages l)) (jfCons "stream" (jbool false) jfNil)))
+def reply : Json -> Text :=
+  fun (j : Json) => fold (fun (x : Json) (rest : Text) => textOf (fieldOf "content" (fieldOf "message" x))) "" (itemsOf j)
+def transcript : Log -> Text := fun (l : Log) => textAppend (jsonRender (jarr (messages l))) "\n"
+-- The samples (the gate evaluates each).
+def demoLog : Log := logAppend (logAppend logEmpty (entry "user" "hi")) (entry "assistant" "hello")
+def demoTranscript : Text := transcript demoLog
+def demoRequest : Text := jsonRender (request "m" demoLog)
+def sampleChat : Json :=
+  jarr (jlCons (jobj (jfCons "model" (jstr "m") (jfCons "message" (jobj (jfCons "role" (jstr "assistant") (jfCons "content" (jstr "hi there") jfNil))) (jfCons "done" (jbool true) jfNil)))) jlNil)
+def sampleReply : Text := reply sampleChat
+def threeLog : Log := logAppend demoLog (entry "user" "bye")
+def threeOrder : Text := jsonRender (jarr (messages threeLog))
+-- The effects. answer writes the reply (inr) or the error text (inl). At
+-- inr the next Log is LU with the assistant entry. At inl the next Log is
+-- L:  the user line drops. ask sends the request of LU. turn reads one
+-- line:  at the end of the input, the loop ends with L.
+def answer : Log -> Log -> Sum Text Json -> IO (Sum Log Log) :=
+  fun (l : Log) (lu : Log) (r : Sum Text Json) => either
+    (fun (e : Text) => map (fun (u : Unit) => inr l) (write (textAppend e "\n")))
+    (fun (j : Json) => map (fun (u : Unit) => inr (logAppend lu (entry "assistant" (reply j)))) (write (textAppend (reply j) "\n"))) r
+def ask : Text -> Log -> Log -> IO (Sum Log Log) :=
+  fun (m : Text) (l : Log) (lu : Log) => bind (ollama "/api/chat" (request m lu)) (answer l lu)
+def turn : Text -> Log -> IO (Sum Log Log) :=
+  fun (m : Text) (l : Log) => bind readLine (fun (r : Option Text) => option (pure (inl l)) (fun (t : Text) => ask m l (logAppend l (entry "user" t))) r)
+def main : IO Unit :=
+  bind args (fun (a : Json) => bind (ioLoop Log Log (turn (firstText "llama3.2" a)) logEmpty) (fun (l : Log) => write (transcript l)))

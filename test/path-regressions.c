@@ -593,6 +593,10 @@ static int ollama_rows(void) {
   many = ollama_many_out();
   failed += !ollama_case("ollama many", "/mock/many", many != NULL ? many : "no memory");
   free(many);
+  failed += !fs_case("ollama api chat",
+    "ollama \"/api/chat\" (jobj (jfCons \"messages\" (jarr (jlCons (jobj (jfCons \"role\" (jstr \"user\") jfNil))"
+    " (jlCons (jobj (jfCons \"role\" (jstr \"assistant\") jfNil)) jlNil))) jfNil))",
+    0, "[{\"model\":\"m\",\"message\":{\"role\":\"assistant\",\"content\":\"reply 2\"},\"done\":true}]");
   pr_ollama_host = NULL;
   kill(child, SIGTERM);
   waitpid(child, NULL, 0);

@@ -12,7 +12,8 @@
    a copy of the environment that has HOME under build/fs/term/trash-home
    (fixture_env), never the real HOME. An ollama row (S7) runs with a copy
    of the environment that has OLLAMA_HOST=127.0.0.1:PORT, PORT the port of
-   the mock of test/mock-ollama.c (ollama-refused: port 1, no listener).
+   the mock of test/mock-ollama.c (ollama-refused and ollama-chat-down:
+   port 1, no listener).
    The runner forks the mock child before the rows and ends it after them.
    An example row (S8 Q12 (a)) has no NAME.lang:  the table example_rows
    gives its example, and langc builds examples/EXAMPLE.lang.
@@ -177,6 +178,8 @@ typedef struct {
 } ExampleRow;
 
 static const ExampleRow example_rows[] = {
+  {"ollama-chat-down", "chat"},
+  {"ollama-chat-loop", "chat"},
   {"organize-apply", "organize"},
   {"organize-collide", "organize"},
   {"organize-empty-arg", "organize"},
@@ -273,7 +276,8 @@ static int fixtures(void) {
    the ollama rows get a copy without XDG_DATA_HOME and OLLAMA_HOST (the
    keys that can move a root). trash-home gets
    HOME=CWD/build/fs/term/trash-home/home, an ollama row gets
-   OLLAMA_HOST=127.0.0.1:PORT (kickoff section 5: no test uses the real
+   OLLAMA_HOST=127.0.0.1:PORT (port 1 for ollama-refused and
+   ollama-chat-down;  kickoff section 5: no test uses the real
    HOME or a real Ollama, and the runner does not call setenv). Returns
    NULL when the copy cannot be made. */
 static char *const *fixture_env(const char *name) {
@@ -284,11 +288,12 @@ static char *const *fixture_env(const char *name) {
   size_t i;
   size_t key;
   int trash = strcmp(name, "trash-home") == 0;
+  int refused = strcmp(name, "ollama-refused") == 0 || strcmp(name, "ollama-chat-down") == 0;
   int len;
   if (!trash && strncmp(name, "ollama-", 7) != 0) return environ;
   if (trash && getcwd(cwd, sizeof cwd) == NULL) return NULL;
   len = trash ? snprintf(extra, sizeof extra, "HOME=%s/build/fs/term/trash-home/home", cwd)
-              : snprintf(extra, sizeof extra, "OLLAMA_HOST=127.0.0.1:%u", strcmp(name, "ollama-refused") == 0 ? 1u : mock_port);
+              : snprintf(extra, sizeof extra, "OLLAMA_HOST=127.0.0.1:%u", refused ? 1u : mock_port);
   if (len < 0 || (size_t)len >= sizeof extra) return NULL;
   key = (size_t)(strchr(extra, '=') - extra) + 1u;
   for (i = 0; environ[i] != NULL && n < MAX_ENV; i++)

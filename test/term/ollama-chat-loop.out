@@ -1,0 +1,4 @@
+reply 1
+reply 3
+reply 5
+[{"role":"user","content":"a"},{"role":"assistant","content":"reply 1"},{"role":"user","content":"b"},{"role":"assistant","content":"reply 3"},{"role":"user","content":"c"},{"role":"assistant","content":"reply 5"}]
