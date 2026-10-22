@@ -1,0 +1,94 @@
+-- The file organizer (S8). organize DIR writes the plan: one line
+-- NAME -> FOLDER/NAME for each file at the top level of DIR, and does not
+-- change the tree. organize DIR --apply (the last argument) moves each
+-- file into DIR/FOLDER (makeDir, then move) and writes its line with
+-- ": ok" or ": TEXT" (the inl text of makeDir or move). The next file goes
+-- on. Then it writes one line: the find response of DIR for the glob *.
+-- FOLDER is the bytes after the last "." at index 1 or later, with A to Z
+-- lowered, or other when there are no such bytes. Directories, links and
+-- names that start with "." stay. With no argument, DIR is ".". The file
+-- has no import: itemsOf, fieldOf and textOf are the folds of
+-- examples/ollama.lang.
+def noJson : List Json := nil
+def itemsOf : Json -> List Json :=
+  fun (j : Json) => second (fold (Prod Json (List Json)) (Prod JsonList (List Json)) JsonFields
+    (pair jnull noJson) (fun (b : Bool) => pair (jbool b) noJson) (fun (n : Sum Int64 Text) => pair (jnum n) noJson) (fun (t : Text) => pair (jstr t) noJson)
+    (fun (l : Prod JsonList (List Json)) => pair (jarr (first l)) (second l)) (fun (f : JsonFields) => pair (jobj f) noJson)
+    (pair jlNil noJson) (fun (h : Prod Json (List Json)) (t : Prod JsonList (List Json)) => pair (jlCons (first h) (first t)) (cons (first h) (second t)))
+    jfNil (fun (k : Text) (v : Prod Json (List Json)) (t : JsonFields) => jfCons k (first v) t) j)
+def fieldOf : Text -> Json -> Json :=
+  fun (k : Text) (j : Json) => second (fold (Prod Json Json) JsonList (Prod JsonFields Json)
+    (pair jnull jnull) (fun (b : Bool) => pair (jbool b) jnull) (fun (n : Sum Int64 Text) => pair (jnum n) jnull) (fun (t : Text) => pair (jstr t) jnull)
+    (fun (l : JsonList) => pair (jarr l) jnull) (fun (f : Prod JsonFields Json) => pair (jobj (first f)) (second f))
+    jlNil (fun (h : Prod Json Json) (t : JsonList) => jlCons (first h) t)
+    (pair jfNil jnull) (fun (key : Text) (v : Prod Json Json) (t : Prod JsonFields Json) => pair (jfCons key (first v) (first t)) (boolIf Json (textEq key k) (first v) (second t))) j)
+def textOf : Json -> Text :=
+  fun (j : Json) => fold Text Unit Unit "" (fun (b : Bool) => "") (fun (n : Sum Int64 Text) => "") (fun (t : Text) => t) (fun (l : Unit) => "") (fun (f : Unit) => "")
+    unit (fun (h : Text) (t : Unit) => unit) unit (fun (k : Text) (v : Text) (t : Unit) => unit) j
+-- firstText gives the first argument, or D when there is no argument.
+-- lastText gives the last argument, including an empty one.
+def firstText : Text -> Json -> Text :=
+  fun (d : Text) (a : Json) => fold (fun (x : Json) (rest : Text) => textOf x) d (itemsOf a)
+def lastText : Json -> Text :=
+  fun (a : Json) => second (fold (fun (x : Json) (rest : Prod Bool Text) => pair true (boolIf Text (first rest) (second rest) (textOf x))) (pair false "") (itemsOf a))
+-- Apply needs a directory argument and the flag as the final argument.
+def applyArgs : Json -> Bool :=
+  fun (a : Json) => boolIf Bool (natLe 2 (fold (fun (x : Json) (n : Nat) => succ n) 0 (itemsOf a))) (textEq (lastText a) "--apply") false
+-- lastDot gives the index of the last "." at index 1 or later (a Nat fold
+-- over the indexes 1 to LENGTH - 1), or none.
+def noNat : Option Nat := none
+def lastDot : Text -> Option Nat :=
+  fun (t : Text) => second (fold (fun (acc : Prod Nat (Option Nat)) => pair (succ (first acc)) (boolIf (Option Nat) (textEq (textSlice t (first acc) (succ (first acc))) ".") (some (first acc)) (second acc))) (pair 1 noNat) (natSub (textLength t) 1))
+-- lowerByte gives the lower case letter of a one-byte text A to Z (the
+-- table lowerTable), or the same text. lower does this for each byte.
+def noPairs : List (Prod Text Text) := nil
+def lowerTable : List (Prod Text Text) :=
+  cons (pair "A" "a") (cons (pair "B" "b") (cons (pair "C" "c") (cons (pair "D" "d") (cons (pair "E" "e") (cons (pair "F" "f") (cons (pair "G" "g")
+    (cons (pair "H" "h") (cons (pair "I" "i") (cons (pair "J" "j") (cons (pair "K" "k") (cons (pair "L" "l") (cons (pair "M" "m") (cons (pair "N" "n")
+    (cons (pair "O" "o") (cons (pair "P" "p") (cons (pair "Q" "q") (cons (pair "R" "r") (cons (pair "S" "s") (cons (pair "T" "t") (cons (pair "U" "u")
+    (cons (pair "V" "v") (cons (pair "W" "w") (cons (pair "X" "x") (cons (pair "Y" "y") (cons (pair "Z" "z") noPairs)))))))))))))))))))))))))
+def lowerByte : Text -> Text :=
+  fun (c : Text) => fold (fun (p : Prod Text Text) (rest : Text) => boolIf Text (textEq c (first p)) (second p) rest) c lowerTable
+def lower : Text -> Text :=
+  fun (t : Text) => second (fold (fun (acc : Prod Nat Text) => pair (succ (first acc)) (textAppend (second acc) (lowerByte (textSlice t (first acc) (succ (first acc)))))) (pair 0 "") (textLength t))
+-- extOf gives the bytes after lastDot. folderOf gives the folder of a file
+-- name. planLine gives the line of a file.
+def extOf : Text -> Text :=
+  fun (t : Text) => option "" (fun (i : Nat) => textSlice t (succ i) (textLength t)) (lastDot t)
+def folderOf : Text -> Text := fun (t : Text) => boolIf Text (textEq (extOf t) "") "other" (lower (extOf t))
+def join : Text -> Text -> Text := fun (d : Text) (n : Text) => textAppend d (textAppend "/" n)
+def planLine : Text -> Text := fun (n : Text) => textAppend n (textAppend " -> " (join (folderOf n) n))
+def report : Sum Text Unit -> Text := fun (s : Sum Text Unit) => either (fun (e : Text) => textAppend ": " e) (fun (u : Unit) => ": ok") s
+-- The samples (the gate evaluates each).
+def gzFolder : Text := folderOf "a.tar.gz"
+def dotFolder : Text := folderOf ".bashrc"
+def bareFolder : Text := folderOf "noext"
+def trailFolder : Text := folderOf "trail."
+def upperFolder : Text := folderOf "b.TXT"
+def capsFolder : Text := folderOf "B.TXT"
+def samplePlan : Text := planLine "b.TXT"
+def noArgMode : Text := boolIf Text (applyArgs (jarr jlNil)) "apply" "plan"
+def singleFlagMode : Text := boolIf Text (applyArgs (jarr (jlCons (jstr "--apply") jlNil))) "apply" "plan"
+def emptyLastMode : Text := boolIf Text (applyArgs (jarr (jlCons (jstr "dir") (jlCons (jstr "--apply") (jlCons (jstr "") jlNil))))) "apply" "plan"
+def applyMode : Text := boolIf Text (applyArgs (jarr (jlCons (jstr "dir") (jlCons (jstr "--apply") jlNil)))) "apply" "plan"
+def middleFlagMode : Text := boolIf Text (applyArgs (jarr (jlCons (jstr "dir") (jlCons (jstr "--apply") (jlCons (jstr "tail") jlNil))))) "apply" "plan"
+-- The effects. result writes the line of the file N with the report of S.
+-- moveOne makes DIR/FOLDER, then moves DIR/NAME to DIR/FOLDER/NAME.
+def result : Text -> Sum Text Unit -> IO Unit :=
+  fun (n : Text) (s : Sum Text Unit) => write (textAppend (planLine n) (textAppend (report s) "\n"))
+def moveOne : Text -> Text -> Text -> IO Unit :=
+  fun (d : Text) (f : Text) (n : Text) => bind (makeDir (join d f)) (fun (r : Sum Text Unit) => either
+    (fun (e : Text) => result n r) (fun (u : Unit) => bind (move (join d n) (join (join d f) n)) (result n)) r)
+def fileItem : Bool -> Text -> Text -> IO Unit :=
+  fun (go : Bool) (d : Text) (n : Text) => boolIf (IO Unit) (textEq (textSlice n 0 1) ".") (ioPure Unit unit)
+    (boolIf (IO Unit) go (moveOne d (folderOf n) n) (write (textAppend (planLine n) "\n")))
+def item : Bool -> Text -> Json -> IO Unit :=
+  fun (go : Bool) (d : Text) (x : Json) => boolIf (IO Unit) (textEq (textOf (fieldOf "kind" x)) "file") (fileItem go d (textOf (fieldOf "name" x))) (ioPure Unit unit)
+def items : Bool -> Text -> List Json -> IO Unit :=
+  fun (go : Bool) (d : Text) (l : List Json) => fold (fun (x : Json) (rest : IO Unit) => bind (item go d x) (fun (u : Unit) => rest)) (ioPure Unit unit) l
+def tree : Text -> IO Unit :=
+  fun (d : Text) => bind (find d "*") (fun (r : Sum Text Json) => write (textAppend (either (fun (e : Text) => e) (fun (j : Json) => jsonRender j) r) "\n"))
+def organize : Bool -> Text -> IO Unit :=
+  fun (go : Bool) (d : Text) => bind (listDir d) (fun (r : Sum Text Json) => either (fun (e : Text) => write (textAppend e "\n"))
+    (fun (j : Json) => bind (items go d (itemsOf j)) (fun (u : Unit) => boolIf (IO Unit) go (tree d) (ioPure Unit unit))) r)
+def main : IO Unit := bind args (fun (a : Json) => organize (applyArgs a) (firstText "." a))

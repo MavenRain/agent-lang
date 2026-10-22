@@ -1,0 +1,6 @@
+a.txt -> txt/a.txt: ok
+b.TXT -> txt/b.TXT: ok
+c.md -> md/c.md: ok
+noext -> other/noext: ok
+x.tar.gz -> gz/x.tar.gz: ok
+["build/fs/term/organize-apply/.hidden","build/fs/term/organize-apply/gz","build/fs/term/organize-apply/gz/x.tar.gz","build/fs/term/organize-apply/l","build/fs/term/organize-apply/md","build/fs/term/organize-apply/md/c.md","build/fs/term/organize-apply/other","build/fs/term/organize-apply/other/noext","build/fs/term/organize-apply/sub","build/fs/term/organize-apply/txt","build/fs/term/organize-apply/txt/a.txt","build/fs/term/organize-apply/txt/b.TXT"]

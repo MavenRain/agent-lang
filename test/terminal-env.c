@@ -80,6 +80,27 @@ int main(void) {
     environ = saved_env;
   }
 
+  /* S8 Q12 (a): an example row builds examples/NAME.lang, another row its
+     test/term/NAME.lang. */
+  {
+    char example[PATH_BYTES];
+    char other[PATH_BYTES];
+    fixture_source("organize-apply", example, sizeof example);
+    fixture_source("list-dir", other, sizeof other);
+    expect(strcmp(example, "examples/organize.lang") == 0 && strcmp(other, "test/term/list-dir.lang") == 0,
+        "an example row builds examples/NAME.lang");
+  }
+
+  {
+    char text[] = "dir\n--apply\n\n\"\"\n";
+    char *argv[4];
+    int count = fixture_args(text, argv, 4);
+    expect(count == 4 && strcmp(argv[0], "dir") == 0
+        && strcmp(argv[1], "--apply") == 0
+        && strcmp(argv[2], "") == 0 && strcmp(argv[3], "") == 0,
+        "fixture arguments preserve an empty final argument");
+  }
+
   /* getcwd still fits PATH_BYTES, but adding the HOME suffix does not. */
   if ((mkdir("build", 0755) != 0 && errno != EEXIST)
       || (mkdir("build/fs", 0755) != 0 && errno != EEXIST)

@@ -14,6 +14,8 @@
    of the environment that has OLLAMA_HOST=127.0.0.1:PORT, PORT the port of
    the mock of test/mock-ollama.c (ollama-refused: port 1, no listener).
    The runner forks the mock child before the rows and ends it after them.
+   An example row (S8 Q12 (a)) has no NAME.lang:  the table example_rows
+   gives its example, and langc builds examples/EXAMPLE.lang.
    The runner writes only under build/term/ and build/fs/term/. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
@@ -75,6 +77,22 @@ static long slurp(const char *path, char *buf, size_t cap) {
   return (long)len;
 }
 
+/* Each line is one argument, including an empty line. The line "" also
+   denotes an empty argument, without a blank line at the end of the file.
+   A final newline terminates its argument without adding another one. */
+static int fixture_args(char *text, char **argv, int cap) {
+  int count = 0;
+  char *line = text;
+  while (*line != '\0' && count < cap) {
+    char *end = strchr(line, '\n');
+    if (end != NULL) *end = '\0';
+    argv[count++] = strcmp(line, "\"\"") == 0 ? line + 2 : line;
+    if (end == NULL) break;
+    line = end + 1;
+  }
+  return count;
+}
+
 static int exists(const char *path) {
   struct stat info;
   return stat(path, &info) == 0;
@@ -94,8 +112,8 @@ typedef struct {
   size_t len;
 } FsItem;
 
-static const char *const fs_rows[] = {"copy-tree", "disk-usage", "find-glob", "list-dir", "make-dir", "move-refuse", "read-file",
-  "search-text", "trash-home"};
+static const char *const fs_rows[] = {"copy-tree", "disk-usage", "find-glob", "list-dir", "make-dir", "move-refuse",
+  "organize-apply", "organize-collide", "organize-empty-arg", "organize-plan", "read-file", "search-text", "trash-home"};
 
 static const FsItem fs_items[] = {
   {"list-dir", FS_FILE, "b.txt", "b\n", 2},
@@ -121,7 +139,62 @@ static const FsItem fs_items[] = {
   {"copy-tree", FS_LINK, "d/l", "f.txt", 0},
   {"trash-home", FS_FILE, "a.txt", "a\n", 2},
   {"trash-home", FS_DIR, "home", NULL, 0},
+  {"organize-plan", FS_FILE, "a.txt", "a\n", 2},
+  {"organize-plan", FS_FILE, "b.TXT", "b\n", 2},
+  {"organize-plan", FS_FILE, "c.md", "c\n", 2},
+  {"organize-plan", FS_FILE, ".hidden", "h\n", 2},
+  {"organize-plan", FS_FILE, "noext", "n\n", 2},
+  {"organize-plan", FS_FILE, "x.tar.gz", "x\n", 2},
+  {"organize-plan", FS_DIR, "sub", NULL, 0},
+  {"organize-plan", FS_LINK, "l", "a.txt", 0},
+  {"organize-apply", FS_FILE, "a.txt", "a\n", 2},
+  {"organize-apply", FS_FILE, "b.TXT", "b\n", 2},
+  {"organize-apply", FS_FILE, "c.md", "c\n", 2},
+  {"organize-apply", FS_FILE, ".hidden", "h\n", 2},
+  {"organize-apply", FS_FILE, "noext", "n\n", 2},
+  {"organize-apply", FS_FILE, "x.tar.gz", "x\n", 2},
+  {"organize-apply", FS_DIR, "sub", NULL, 0},
+  {"organize-apply", FS_LINK, "l", "a.txt", 0},
+  {"organize-collide", FS_FILE, "a.txt", "a\n", 2},
+  {"organize-collide", FS_FILE, "b.TXT", "b\n", 2},
+  {"organize-collide", FS_FILE, "c.md", "c\n", 2},
+  {"organize-collide", FS_FILE, ".hidden", "h\n", 2},
+  {"organize-collide", FS_FILE, "noext", "n\n", 2},
+  {"organize-collide", FS_FILE, "x.tar.gz", "x\n", 2},
+  {"organize-collide", FS_DIR, "sub", NULL, 0},
+  {"organize-collide", FS_LINK, "l", "a.txt", 0},
+  {"organize-collide", FS_DIR, "txt", NULL, 0},
+  {"organize-collide", FS_FILE, "txt/a.txt", "old\n", 4},
+  {"organize-empty-arg", FS_FILE, "a.txt", "a\n", 2},
 };
+
+/* The example rows (S8 Q12 (a)):  a row with no test/term/NAME.lang
+   builds examples/EXAMPLE.lang, thus a mutant of an example dies at its
+   row. */
+typedef struct {
+  const char *row;
+  const char *example;
+} ExampleRow;
+
+static const ExampleRow example_rows[] = {
+  {"organize-apply", "organize"},
+  {"organize-collide", "organize"},
+  {"organize-empty-arg", "organize"},
+  {"organize-plan", "organize"},
+};
+
+/* Writes the source of the fixture NAME to SOURCE:  examples/EXAMPLE.lang
+   for an example row, else test/term/NAME.lang. */
+static void fixture_source(const char *name, char *source, size_t cap) {
+  const char *example = NULL;
+  size_t i;
+  for (i = 0; i < sizeof example_rows / sizeof example_rows[0]; i++)
+    if (example == NULL && strcmp(example_rows[i].row, name) == 0) example = example_rows[i].example;
+  if (example != NULL)
+    snprintf(source, cap, "examples/%s.lang", example);
+  else
+    snprintf(source, cap, "test/term/%s.lang", name);
+}
 
 /* Makes build/fs/term/NAME and its items when NAME is an fs row. Returns 0
    and writes a FAIL line if a step fails, else 1. */
@@ -167,11 +240,12 @@ static int by_name(const void *a, const void *b) {
   return strcmp((const char *)a, (const char *)b);
 }
 
-/* Puts the names of the test/term/NAME.lang files in NAMES in order.
-   Returns the count, or -1. */
+/* Puts the names of the test/term/NAME.lang files and the example rows in
+   NAMES in order. Returns the count, or -1. */
 static int fixtures(void) {
   DIR *dir = opendir("test/term");
   struct dirent *entry;
+  size_t i;
   int count = 0;
   if (!dir) return -1;
   while ((entry = readdir(dir)) != NULL) {
@@ -186,6 +260,10 @@ static int fixtures(void) {
     count++;
   }
   closedir(dir);
+  for (i = 0; i < sizeof example_rows / sizeof example_rows[0]; i++) {
+    if (count == MAX_FIXTURES) return -1;
+    snprintf(names[count++], NAME_BYTES, "%s", example_rows[i].row);
+  }
   qsort(names, (size_t)count, sizeof names[0], by_name);
   return count;
 }
@@ -230,13 +308,12 @@ static int run_fixture(const char *name, int code) {
   char source[PATH_BYTES], exe[PATH_BYTES], in[PATH_BYTES], out[PATH_BYTES], err[PATH_BYTES], path[PATH_BYTES];
   char *argv[MAX_ARGS + 2];
   char *build[6];
-  char *line;
   int argc = 1;
   int status;
   long want_len;
   long got_len;
   char *const *env;
-  snprintf(source, sizeof source, "test/term/%s.lang", name);
+  fixture_source(name, source, sizeof source);
   snprintf(exe, sizeof exe, "build/term/%s", name);
   snprintf(out, sizeof out, "build/term/%s.stdout", name);
   snprintf(err, sizeof err, "build/term/%s.stderr", name);
@@ -254,7 +331,7 @@ static int run_fixture(const char *name, int code) {
   snprintf(path, sizeof path, "test/term/%s.args", name);
   argv[0] = exe;
   if (slurp(path, args, sizeof args) > 0)
-    for (line = strtok(args, "\n"); line && argc <= MAX_ARGS; line = strtok(NULL, "\n")) argv[argc++] = line;
+    argc += fixture_args(args, argv + argc, MAX_ARGS);
   argv[argc] = NULL;
   snprintf(in, sizeof in, "test/term/%s.in", name);
   if (!exists(in)) snprintf(in, sizeof in, "/dev/null");
@@ -293,7 +370,7 @@ static int refusal_fixture(const char *name, const char *code) {
   char source[PATH_BYTES], exe[PATH_BYTES], out[PATH_BYTES], err[PATH_BYTES], prefix[PATH_BYTES];
   char *build[6];
   int status;
-  snprintf(source, sizeof source, "test/term/%s.lang", name);
+  fixture_source(name, source, sizeof source);
   snprintf(exe, sizeof exe, "build/term/none/%s", name);
   snprintf(out, sizeof out, "build/term/%s.stdout", name);
   snprintf(err, sizeof err, "build/term/%s.stderr", name);

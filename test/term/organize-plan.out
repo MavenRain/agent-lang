@@ -1,0 +1,5 @@
+a.txt -> txt/a.txt
+b.TXT -> txt/b.TXT
+c.md -> md/c.md
+noext -> other/noext
+x.tar.gz -> gz/x.tar.gz

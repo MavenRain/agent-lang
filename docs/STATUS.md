@@ -1963,3 +1963,79 @@ the last object `"done":true`, rc 0. The first call has a load_duration
 of 59 s (the model load). 10 of 10 mutants are killed (M1 to M10, chunk
 C). The close changes the docs only:  docs/PLAN.md (the row S7) and
 docs/STATUS.md (this line).
+
+## S8:  the examples, mutants and docs (2026-10-22)
+
+### Chunk A:  the organizer and the example rows
+
+Hand build on 127c4dc (the USER commit of the S7 close), from the S8
+kickoff (agent-lang-work/S8-kickoff.md, outside the repo).
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a Q10=a Q11=a Q12=a Q13=a Q14=a Q15=a
+
+- docs/PLAN.md section 1:  the `### USER ruling (S8)` block.
+- examples/organize.lang, one file with no import (Q1 (a)):  the folds
+  itemsOf, fieldOf and textOf of examples/ollama.lang, firstText,
+  lastText, lastDot (Q8 (a):  the last "." at index 1 or later), the
+  table lowerTable (26 pairs A to Z) with lowerByte and lower, extOf,
+  folderOf, join, planLine, report, 7 sample defs, result, moveOne,
+  fileItem, item (kind `file` only, a leading "." stays, Q9 (a)), items,
+  tree, organize and main.  `organize DIR` writes the plan;  `organize
+  DIR --apply` (the last argument, Q10 (a)) moves each file, writes its
+  line with `: ok` or `: TEXT`, then one line with the find response of
+  DIR for the glob `*` (Q11 (a)).
+- test/eval/expect.txt:  7 evals (gzFolder `gz`, dotFolder, bareFolder
+  and trailFolder `other`, upperFolder and capsFolder `txt`, samplePlan
+  `b.TXT -> txt/b.TXT`).  test/json/organize.json:  11 instances.
+- test/terminal.c:  the table example_rows (Q12 (a)) and fixture_source
+  (examples/EXAMPLE.lang for an example row, else test/term/NAME.lang);
+  fixtures adds the example rows.  The fs rows organize-plan,
+  organize-apply and organize-collide, each with the tree a.txt, b.TXT,
+  c.md, .hidden, noext, x.tar.gz, the dir sub and the link l to a.txt
+  (organize-collide also has txt/a.txt).  test/term:  `.args`, `.code`
+  and `.out` for each row, no `.lang`.
+- test/terminal-env.c:  one check that an example row builds
+  examples/NAME.lang.
+- No change:  domain/domain.lang, src/front/check.c,
+  src/runtime/driver.c, the fuel row budget (380).
+
+Gate:  `make -B check` GREEN:  examples 35, parse refusals 14, check
+refusals 88, evals 191, json 35, json refusals 4, `gate: 0 failures`,
+regressions 6, printer regressions 2, path regressions 300, terminal
+environment 7, terminal 28.  `make -B check-clang` rc 0.  The dash sweep
+and `git diff --check` are clean.  No mutant run (chunk C runs M1 to
+M10).
+
+- D1:  `langc eval` gives arguments only to an entry with Nat or Fin
+  parameters (EVAL_ARGS), thus each eval is a closed sample def (for
+  example `gzFolder := folderOf "a.tar.gz"`).
+- D2:  noBool of examples/ollama.lang does not move:  only boolOf uses
+  it.
+- D3:  the find response for `*` holds the dirs and the link l too (the
+  paths sorted), thus the tree line of organize-apply has 12 paths.
+- D4:  the line text comes from planLine, not from the move
+  destination, thus M6 changes the inl text and the tree line only.
+- D5:  for chunk C, the text `"."` occurs 2 times (lastDot and
+  fileItem):  the M5 edit needs the unique text `n 0 1) "."`.  The M7
+  edit replaces `(applyArgs a)` with `false` after the review fix below.
+
+Review (2026-10-22): fixed mode selection that could move files without
+the final apply flag after a directory argument. Before the fix,
+`organize DIR --apply ''` ignored the empty final argument, and
+`organize --apply` applied to a directory named `--apply`. Both now
+write the plan. `lastText` preserves an empty final argument, and
+`applyArgs` requires at least two arguments and the final `--apply`.
+
+Five pure mode samples cover no arguments, a lone `--apply`, an empty
+final argument, a final apply flag and a flag followed by another
+argument. The terminal runner preserves empty argument lines and accepts
+`""` for an empty argument, with an environment check and an
+organize-empty-arg row built from the example.
+That row failed before the example fix and passes after it. The JSON
+golden now has 16 instances.
+
+Review validation in an isolated copy: `make check` GREEN, including
+the clang check, examples 35, parse refusals 14, check refusals 88,
+evals 196, json 35, json refusals 4, regressions 6, printer regressions 2,
+path regressions 300, terminal environment 8 and terminal 29. No checks
+were weakened. No remaining review findings.

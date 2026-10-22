@@ -171,6 +171,23 @@ source, a forked child, port 0.  Q13: U1 allowLocalBinding.  Q14: the
 USER live probe.  Q15: IoEnv ollama_host and ollama_timeout_ms.  Q16:
 one slice S7.  Q17: ignore SIGPIPE.  Q18: `ollama: URL: TEXT`.
 
+### USER ruling (S8)
+
+Ruled 2026-10-22 (S8 kickoff, agent-lang-work/S8-kickoff.md, outside the
+repo).  The USER gave the letter (a) to each Q.
+
+RULINGS: Q1=a Q2=a Q3=a Q4=a Q5=a Q6=a Q7=a Q8=a Q9=a Q10=a Q11=a Q12=a Q13=a Q14=a Q15=a
+
+Q1: 2 examples, each self-contained.  Q2: /api/chat, "stream": false.
+Q3: the model is the first argument, default llama3.2.  Q4: one Log
+entry for each message.  Q5: a failed call drops the user line.  Q6:
+the transcript at the end of the input.  Q7: the mock script at
+/api/chat counts the roles.  Q8: the last dot, lowered, else other.
+Q9: top level files only.  Q10: plan by default, --apply.  Q11: one
+line for each file, then the tree.  Q12: the rows build the example
+files.  Q13: O22 (b), measure 1000 rounds.  Q14: the USER live chat
+probe.  Q15: S8 closes the plan.
+
 ## 2. The request on the kit basis
 
 | Concept | Request text | Encoding (proposal) | Slice |

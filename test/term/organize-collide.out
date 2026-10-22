@@ -1,0 +1,6 @@
+a.txt -> txt/a.txt: move: build/fs/term/organize-collide/txt/a.txt: File exists
+b.TXT -> txt/b.TXT: ok
+c.md -> md/c.md: ok
+noext -> other/noext: ok
+x.tar.gz -> gz/x.tar.gz: ok
+["build/fs/term/organize-collide/.hidden","build/fs/term/organize-collide/a.txt","build/fs/term/organize-collide/gz","build/fs/term/organize-collide/gz/x.tar.gz","build/fs/term/organize-collide/l","build/fs/term/organize-collide/md","build/fs/term/organize-collide/md/c.md","build/fs/term/organize-collide/other","build/fs/term/organize-collide/other/noext","build/fs/term/organize-collide/sub","build/fs/term/organize-collide/txt","build/fs/term/organize-collide/txt/a.txt","build/fs/term/organize-collide/txt/b.TXT"]
